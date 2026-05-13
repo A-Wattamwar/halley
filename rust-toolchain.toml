@@ -1,0 +1,8 @@
+[toolchain]
+# Pinned per docs/plan/phase-1-week-1.md Day 1.
+# Compatibility over shiny: we would rather catch MSRV surprises early
+# than chase the latest release train. Bump only if a dep demands it
+# and log the bump in docs/DECISIONS.md.
+channel = "1.83"
+components = ["rustfmt", "clippy"]
+profile = "minimal"

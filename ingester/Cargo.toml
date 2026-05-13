@@ -1,0 +1,48 @@
+[package]
+name = "halley-ingester"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.83"
+license = "MIT"
+publish = false
+description = "Halley ingester: OTLP receiver and ClickHouse writer (Week 1 skeleton)"
+
+[[bin]]
+name = "halley-ingester"
+path = "src/main.rs"
+
+[dependencies]
+# HTTP server and async runtime.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "signal", "time"] }
+axum = "0.7"
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace"] }
+
+# Serialization.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Errors.
+thiserror = "1"
+anyhow = "1"
+
+# Tracing / structured logging.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Storage: official ClickHouse client. 0.13.3 is the latest 0.x that
+# builds on Rust 1.83 (0.14+ requires 1.89). See docs/DECISIONS.md D16.
+clickhouse = "0.13.3"
+
+# Hashing + hex encoding for cassette body hashes (Day 6).
+sha2 = "0.10"
+hex = "0.4"
+
+# UUIDs: serde-only (we do not generate UUIDs in Week 1). See DECISIONS.md D2.
+uuid = { version = "1", features = ["serde"] }
+
+# Timestamps for test fixtures and log records.
+chrono = { version = "0.4", features = ["serde"] }
+
+# ---- Non-goals (Week 1): do NOT add tonic, prost, opentelemetry-proto. ----
+# Those belong in Week 3 (Phase 2). Keep this tree lean.
