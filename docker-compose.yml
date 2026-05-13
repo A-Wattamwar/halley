@@ -1,0 +1,133 @@
+# Halley — local development stack.
+#
+# Week 1 scope: ClickHouse, Redis, Postgres with healthchecks.
+# The ingester service is commented out until Week 1 Day 7 wires up
+# the Dockerfile. Day 2 adds migration mounts; today the stack just
+# needs to boot clean.
+#
+# Secrets: do not embed credentials here. docker compose automatically
+# loads a sibling `.env` file; `.env.example` lists the expected keys.
+
+services:
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:24.8-alpine
+    # Alpine tag for smaller image; 24.8 is the LTS line current as of
+    # May 2026. FixedString and ReplacingMergeTree behavior we rely on
+    # are stable across 23.x/24.x.
+    container_name: halley-clickhouse
+    restart: unless-stopped
+    environment:
+      CLICKHOUSE_USER: ${CLICKHOUSE_USER:-default}
+      CLICKHOUSE_PASSWORD: ${CLICKHOUSE_PASSWORD:-}
+      CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-halley}
+      # Let a blank password through in dev without tripping the image's
+      # safety check. We explicitly accept this risk for local only.
+      CLICKHOUSE_SKIP_USER_SETUP: "1"
+    ports:
+      - "8123:8123"  # HTTP interface
+      - "9000:9000"  # native protocol (for clickhouse-client)
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
+      - clickhouse-logs:/var/log/clickhouse-server
+      # ClickHouse initdb processes /docker-entrypoint-initdb.d/* (flat glob,
+      # no subdirectory recursion). Files run in sorted order on first boot.
+      # 000 is the .sh database-creation script; 001-003 are .sql migrations.
+      # See docs/DECISIONS.md D5 for the known limitation of this approach.
+      - ./infra/clickhouse/init/000_create_database.sh:/docker-entrypoint-initdb.d/000_create_database.sh:ro
+      - ./infra/clickhouse/migrations/001_observations.sql:/docker-entrypoint-initdb.d/001_observations.sql:ro
+      - ./infra/clickhouse/migrations/002_observation_body.sql:/docker-entrypoint-initdb.d/002_observation_body.sql:ro
+      - ./infra/clickhouse/migrations/003_pricing_versions.sql:/docker-entrypoint-initdb.d/003_pricing_versions.sql:ro
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    healthcheck:
+      # wget --spider is not supported on the Alpine busybox wget.
+      # Use clickhouse-client per the Week 1 plan spec.
+      test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: halley-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-halley}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-halley}
+      POSTGRES_DB: ${POSTGRES_DB:-halley}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Postgres initdb processes /docker-entrypoint-initdb.d/* (flat glob,
+      # no subdirectory recursion). Files run in sorted order on first boot.
+      # Migrations are 001-005; seed is 006 so it runs after all tables exist.
+      - ./infra/postgres/migrations/001_users.sql:/docker-entrypoint-initdb.d/001_users.sql:ro
+      - ./infra/postgres/migrations/002_projects.sql:/docker-entrypoint-initdb.d/002_projects.sql:ro
+      - ./infra/postgres/migrations/003_api_keys.sql:/docker-entrypoint-initdb.d/003_api_keys.sql:ro
+      - ./infra/postgres/migrations/004_fixtures.sql:/docker-entrypoint-initdb.d/004_fixtures.sql:ro
+      - ./infra/postgres/migrations/005_bisect_jobs.sql:/docker-entrypoint-initdb.d/005_bisect_jobs.sql:ro
+      - ./infra/postgres/seeds/001_dev_project.sql:/docker-entrypoint-initdb.d/006_dev_project_seed.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-halley} -d $${POSTGRES_DB:-halley}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
+
+  redis:
+    image: redis:7-alpine
+    container_name: halley-redis
+    restart: unless-stopped
+    # Load our AOF-enabled config (ARCHITECTURE §3.10). The default
+    # redis.conf inside the image does NOT enable AOF.
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ./infra/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 3s
+
+  # ---------- Ingester (Week 1 Day 7) ----------
+  # Intentionally commented out until Day 7. The Rust binary does not
+  # yet exist; leaving the service stub present for reference.
+  #
+  # ingester:
+  #   build:
+  #     context: ./ingester
+  #   container_name: halley-ingester
+  #   restart: unless-stopped
+  #   env_file: .env
+  #   ports:
+  #     - "4318:4318"
+  #   depends_on:
+  #     clickhouse:
+  #       condition: service_healthy
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   healthcheck:
+  #     # Use curl, NOT `wget --spider`: Alpine busybox wget does not
+  #     # support --spider. See docs/DECISIONS.md D10 and D15.
+  #     test: ["CMD", "curl", "-fsS", "http://localhost:4318/healthz"]
+  #     interval: 5s
+  #     timeout: 3s
+  #     retries: 10
+  #     start_period: 5s
+
+volumes:
+  clickhouse-data:
+  clickhouse-logs:
+  postgres-data:
+  redis-data:

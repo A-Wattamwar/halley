@@ -1,184 +1,208 @@
 # Halley — Roadmap
 
-Version: 0.1 (May 13, 2026)
+Version: 0.2 (May 13, 2026)
 Owner: Ayush Wattamwar
 
-This document is the living plan. When we change direction mid-build, we update this file first, then the code. It is the truth base for "what are we doing this week."
+Living plan. When direction changes mid-build, we update this file first, then the code. Truth base for "what are we doing this week."
 
 ---
 
 ## Timeline
 
-- **Start:** May 13, 2026
-- **End:** August 31, 2026
-- **Total:** ~16 weeks, planned as **12 working weeks + 4 weeks of buffer** for interviews, schoolwork prep, or scope recovery.
-- **Target effort:** 25–30 hrs/week. ~300–360 hours total.
+- **Start**: May 13, 2026
+- **End**: August 31, 2026
+- **Total**: 16 weeks = 12 working weeks + 4 buffer weeks for interviews, schoolwork, or scope recovery.
+- **Target effort**: 25 to 30 hrs/week. ~300 to 360 hours total.
+- **Cadence**: Sundays off. Saturdays for docs, commits, and weekly updates to this file.
+
+---
+
+## Product frame
+
+Halley's hero capability: **your production traffic is your test suite**. We record production agent runs as bit-fidelity cassettes, infer invariants, let the user save any run as a fixture in their repo, and run the fixture library as zero-cost deterministic CI that catches prompt and model regressions before they ship.
+
+Everything else (OTLP ingest, reasoning graph, cost analytics, interactive replay) is supporting infrastructure for that loop.
 
 ---
 
 ## North-star success criteria (August 31, 2026)
 
-By the end of summer, Halley must have:
+By end of summer, Halley must have:
 
-1. A public GitHub repo with clean commit history and a polished README.
+1. Public GitHub repo with clean commit history and polished README.
 2. `docker compose up` stands up the full stack in under 60 seconds.
-3. The TypeScript SDK published to npm as `@halley/sdk` v0.1.0.
-4. End-to-end ingestion at 5,000+ spans/sec on a single laptop-class VM, verified with a load test.
-5. A live demo URL where anyone can view a read-only dashboard with real agent traces (from Ayush's own instrumented RAG tutor and reasoning agent).
-6. A 3-minute demo video on YouTube.
-7. A technical blog post on `ayushwattamwar.com` explaining the replay/fork mechanic.
-8. A Show HN launch post and `r/MachineLearning` launch.
-9. Three updated resume bullets that stand alone as interview-worthy.
+3. `@halley/sdk` published to npm as v0.1.0 (optional convenience wrapper).
+4. `halley` CLI published as a standalone Rust binary and a GitHub Action.
+5. End-to-end ingestion at 5,000+ spans/sec on a single laptop-class VM, verified with a load test.
+6. Normalizer passes property-based tests proving round-trip correctness for four dialects: OTEL GenAI, OpenLLMetry, OpenInference, Vercel AI SDK.
+7. **The hero demo**: one prompt change breaks three real fixtures in CI, `halley bisect` points at the prompt line that did it, full flow under 40 seconds on camera.
+8. Live hosted demo with read-only dashboard and real traces from Ayush's instrumented apps.
+9. 3-minute YouTube demo video centered on the prompt-change-breaks-CI loop.
+10. Technical blog post on `ayushwattamwar.com` about cassette-based replay and invariant inference.
+11. Show HN launch and `r/MachineLearning` post.
+12. Three resume bullets that stand alone as interview-worthy.
 
-Any one of those missing means we didn't finish. All of them shipped, even if imperfectly, means we did.
+All shipped, even if imperfect = we did. Any one missing = we did not.
 
 ---
 
 ## Phase plan
 
-### Phase 1 — Foundations (Weeks 1–2, May 13 – May 26)
+### Phase 1: Foundations (Weeks 1-2, May 13 - May 26)
 
-**Goal:** End-to-end skeleton running locally. No features. Just plumbing.
+**Goal**: End-to-end skeleton running locally. No features beyond ingest.
 
-- [ ] Repo scaffolding: monorepo with `sdk-ts/`, `ingester/` (Rust), `dashboard/` (Next.js), `worker/` (Node), `infra/` (Docker Compose + migrations), `examples/`.
-- [ ] `docker compose up` starts ClickHouse, Redis, Postgres, placeholder ingester, placeholder dashboard — all with healthchecks green.
-- [ ] ClickHouse initial migration (the `spans` and `runs` tables).
-- [ ] Postgres initial migration (users, projects, api_keys).
-- [ ] Hello-world Rust ingester: accepts HTTP POST of a JSON span → writes to ClickHouse. No OTLP yet.
-- [ ] Hello-world Next.js dashboard: reads from ClickHouse, renders a table of spans.
-- [ ] Read the OpenTelemetry GenAI semantic conventions spec end-to-end. Take 1 page of notes.
-- [ ] Skim the Langfuse and Helicone source code. 1 page of notes on each.
+- [ ] Monorepo scaffold: `sdk-ts/`, `ingester/` (Rust), `cli/` (Rust), `dashboard/` (Next.js), `worker/` (Node), `infra/`, `examples/`.
+- [ ] `docker compose up` starts ClickHouse, Redis (with AOF on), Postgres, ingester, dashboard; all healthchecks green.
+- [ ] ClickHouse migration: `halley.observations` and `halley.observation_body` tables per ARCHITECTURE §4.1.
+- [ ] ClickHouse migration: `halley.pricing_versions` with seed rows for OpenAI, Anthropic, Gemini current pricing.
+- [ ] Postgres migration: `users`, `projects`, `api_keys`, `fixtures`, `bisect_jobs`.
+- [ ] Rust ingester skeleton: axum bootstrap, `/v1/spans/json` HTTP endpoint (not OTLP yet), writes to ClickHouse.
+- [ ] Dashboard placeholder: Next.js page reads observations from ClickHouse, renders a table.
+- [ ] Read OpenTelemetry GenAI semantic conventions end to end. 1 page of notes.
+- [ ] Skim Langfuse v4 and Laminar source. 1 page of notes each: how they capture bodies, how they handle live updates, how they normalize dialects.
 
-**Deliverable:** A Rust service that accepts a span and a Next.js page that displays it. Docker Compose brings up the whole thing in one command.
+**Deliverable**: JSON span in, ClickHouse row out, browser table shows it, all via `docker compose up`.
 
-### Phase 2 — Rust Ingester, Real (Weeks 3–4, May 27 – June 9)
+### Phase 2: OTLP and the normalizer (Weeks 3-4, May 27 - June 9)
 
-**Goal:** Production-quality Rust ingester speaking OTLP.
+**Goal**: Production-quality ingester speaking OTLP with honest dialect coverage.
 
-- [ ] OTLP/gRPC receiver on port 4317 using `tonic` + `opentelemetry-proto`.
-- [ ] OTLP/HTTP receiver on port 4318 using `axum`, supporting both protobuf and JSON payload encoding.
-- [ ] GenAI semantic-convention validation: reject malformed spans with structured error.
-- [ ] Span enrichment: compute `cost_usd` from a per-model pricing table (OpenAI + Anthropic + Gemini at minimum).
-- [ ] Run-grouping logic: assign a `run_id` to every span based on the agent-run heuristics in ARCHITECTURE.md §3.2.
-- [ ] Redis Streams publisher.
-- [ ] Writer task (same binary): consumer-group reader, 500-span/100-ms batch inserts to ClickHouse.
-- [ ] Prometheus metrics on `/metrics`.
-- [ ] Structured logging via `tracing` crate.
-- [ ] Integration tests: spin up ClickHouse + Redis in test containers, fire 10k OTLP spans, verify all land in ClickHouse.
-- [ ] Load test with `k6` or `ghz`: sustain 5,000 spans/sec for 10 minutes on a single node.
+- [ ] OTLP/gRPC receiver on :4317 using `tonic` + `opentelemetry-proto`.
+- [ ] OTLP/HTTP receiver on :4318 using `axum`, protobuf and JSON.
+- [ ] Normalizer: adapters for OTEL GenAI, OpenLLMetry, OpenInference, Vercel AI SDK. Canonical mapping documented.
+- [ ] **Property-based tests** for each adapter: canonical -> dialect -> canonical is the identity on supported attributes. Unknown attributes preserved in `attributes` map.
+- [ ] Cassette capture: raw request and response bodies stored content-addressed in `observation_body`, hashes in `observations`.
+- [ ] Run-grouping: the four-tier heuristic in ARCHITECTURE §3.4.
+- [ ] Redis Streams publisher + DLQ stream.
+- [ ] Writer task: consumer group, 500-span/100-ms batches, dedup body hashes before insert.
+- [ ] Prometheus metrics per ARCHITECTURE §7.2.
+- [ ] Integration tests with `testcontainers`: fire 10K OTLP spans across all four dialects, verify canonical rows land correctly.
+- [ ] Load test with `k6` or `ghz`: sustain 5K spans/sec for 10 minutes.
 
-**Deliverable:** Ingester that passes 10-minute sustained load test. README benchmark numbers published.
+**Deliverable**: ingester passes sustained load test, published compatibility matrix (four dialects), `halley_body_dedup_ratio` metric visible.
 
-### Phase 3 — SDK + First Customer (Weeks 5–6, June 10 – June 23)
+### Phase 3: SDK and first real traces (Weeks 5-6, June 10 - June 23)
 
-**Goal:** A 3-line TypeScript integration that lights up the dashboard with real traces.
+**Goal**: Three example apps, three different instrumentation libraries, one dashboard.
 
-- [ ] `@halley/sdk` package built on `@opentelemetry/sdk-node`.
-- [ ] Auto-instrumentation wrappers for `openai`, `@anthropic-ai/sdk`, `@langchain/*`.
-- [ ] Helper API: `halley.run(name, fn)`, `halley.step(name, fn)`, `halley.feedback(runId, score, comment)`.
-- [ ] Offline queueing: in-memory ring buffer with disk spillover.
-- [ ] Unit tests >= 80% coverage.
-- [ ] Integration example: instrument Ayush's LLM Reasoning Agent end-to-end, push real traces, see them in the dashboard.
-- [ ] Integration example: instrument a minimal LangChain agent from scratch, push real traces.
-- [ ] Publish `@halley/sdk` to npm as v0.1.0.
+- [ ] `@halley/sdk` on `@opentelemetry/sdk-node`, OTLP exporter preconfigured, helpers `halley.run`, `halley.step`, `halley.feedback`, `halley.markToolEffect`.
+- [ ] Offline queueing: in-memory ring + disk spillover.
+- [ ] SDK unit tests >=80% coverage.
+- [ ] Example 1: Ayush's Reasoning Agent instrumented with OpenLLMetry (no Halley SDK).
+- [ ] Example 2: a minimal LangChain agent instrumented via OpenInference.
+- [ ] Example 3: a Vercel AI SDK app instrumented via its native OTEL export.
+- [ ] All three land in the same dashboard with correct canonical schema; published screenshot proves it.
+- [ ] Publish `@halley/sdk` v0.1.0 to npm.
 
-**Deliverable:** `npm install @halley/sdk` works. A 3-line integration captures traces from a real OpenAI call. Two example apps under `examples/`.
+**Deliverable**: `npm install @halley/sdk` works but is explicitly optional; three example apps under `examples/` prove polyglot ingest.
 
-### Phase 4 — Dashboard Core (Weeks 7–8, June 24 – July 7)
+### Phase 4: Dashboard core (Weeks 7-8, June 24 - July 7)
 
-**Goal:** Dashboard usable for real debugging.
+**Goal**: Dashboard usable for real debugging. Scope tightened from v0.1.
 
-- [ ] Next.js 14 App Router project, Tailwind, shadcn/ui components.
-- [ ] Auth.js with email/password + Postgres adapter. Login and project switching.
+- [ ] Next.js 14 App Router, Tailwind, shadcn/ui.
+- [ ] Auth.js with email+password + Postgres adapter. Login, project switching.
 - [ ] API keys page: create, rotate, revoke.
-- [ ] Runs list: server-rendered table, infinite scroll, column sort, filter by project, model, status, cost, time range.
-- [ ] Run detail: timeline view at top, reasoning graph canvas below (use `reactflow` for the DAG rendering).
-- [ ] Span inspector panel: prompt, completion, tool I/O, token counts, cost, timing. Syntax-highlighted JSON.
-- [ ] WebSocket endpoint `/api/ws/runs/:id` subscribed to Redis Pub/Sub, pushing live span updates.
-- [ ] Full-text search over prompt/completion content using ClickHouse's `hasToken` / tokenized columns.
-- [ ] Keyboard shortcuts: `cmd+k` command palette, arrow keys to navigate spans.
-- [ ] Playwright E2E test for: create project → emit span via SDK → see it in the dashboard within 2 seconds.
+- [ ] Runs list: server-rendered, paginated by time, two filters (project, time range). Sort by start_time desc only.
+- [ ] Run detail: timeline + reasoning graph via `reactflow` + span inspector (prompt, completion, tool I/O, token counts, cost, timing).
+- [ ] Cost is computed at read time from `pricing_versions`.
+- [ ] Single `halley-query` module enforces project-scoped auth; all server components route through it.
+- [ ] WebSocket endpoint `/api/ws/runs/:id` subscribed to Redis Pub/Sub; live updates.
+- [ ] One Playwright E2E: emit span via SDK -> see it in dashboard within 2 seconds.
 
-**Deliverable:** A deployable dashboard where a real developer would want to debug their agent.
+**Explicitly cut from v0.1**: full-text search over content, infinite scroll, column sorting, cmd+k palette, keyboard nav. Push to Phase 6 polish if time allows.
 
-### Phase 5 — Differentiators (Weeks 9–10, July 8 – July 21)
+**Deliverable**: a dashboard a real developer would use to debug an agent.
 
-**Goal:** The features that make Halley *Halley.*
+### Phase 5: The hero loop (Weeks 9-10, July 8 - July 21)
 
-**Replay & fork:**
-- [ ] Worker service (Node.js + BullMQ) running in its own container.
-- [ ] "Fork from this step" button in the dashboard's span inspector.
-- [ ] Override form: new prompt / new model / injected tool response.
-- [ ] Replay worker loads historical spans, reconstructs state, re-executes the agent from the fork point.
-- [ ] New run shown side-by-side with the original for comparison.
+**Goal**: Production run to fixture to CI to bisect. The thing that makes Halley Halley.
 
-**Outcome-level evaluation:**
-- [ ] Eval suite editor in the dashboard: name, dataset upload (JSON/CSV), scoring method (exact-match, embedding-sim, LLM-as-judge, custom JS).
-- [ ] Eval run executor in worker: pulls dataset, calls the target agent endpoint, scores outputs, writes results.
-- [ ] Eval results view: pass/fail matrix, per-item drill-down, trend line over time.
-- [ ] Regression alert: compare aggregate score to rolling 5-run average; alert if below a configurable threshold.
+**Turn into test (UI + worker)**
+- [ ] "Turn this run into a test" button on any run detail.
+- [ ] Worker `invariant.infer` job: structural, schema, metric invariants auto-proposed.
+- [ ] Invariant editor in dashboard: accept / edit / reject each proposal.
+- [ ] Fixture writer: write `halley/fixtures/<slug>.json` + `/bodies/` to user's repo via configured local path. GitHub App integration is Phase 6.
+- [ ] Fixture format documented, versioned, stable.
 
-**Cost analytics:**
-- [ ] Cost dashboard: line chart of dollars/day, grouped by model or project or tag.
-- [ ] Top-runs-by-cost leaderboard.
-- [ ] Budget alerts: email + webhook when daily spend exceeds threshold.
+**halley CLI + replay engine**
+- [ ] `halley ci`: discover fixtures, run replay, evaluate invariants, exit code + JUnit XML output.
+- [ ] `halley record <run_id>`: pull a run from the backend and write a local fixture.
+- [ ] `halley diff <fixture_id>`: show prompt / model / tool / output deltas vs. the recorded baseline.
+- [ ] Replay modes: pure (all cassette hits), hybrid (prompt changed, LLM call live, tools cached), fresh (explicit re-record).
+- [ ] Cassette matching algorithm documented.
+- [ ] Published GitHub Action wraps `halley ci`.
 
-**Deliverable:** Eval run on Ayush's own Reasoning Agent published as a blog post draft. Replay/fork demo recorded.
+**Bisect**
+- [ ] `halley bisect <fixture_id>`: binary search recent commits, report the first failing commit and a one-line diff summary.
+- [ ] `bisect.run` worker job surfaces progress in the dashboard.
 
-### Phase 6 — Polish & Launch (Weeks 11–12, July 22 – August 4)
+**Tool-effect-safe replay**
+- [ ] `halley.markToolEffect(name, 'pure' | 'idempotent' | 'irreversible')` in SDK.
+- [ ] Replay refuses to re-execute `irreversible` tool calls without an explicit override or substitute.
+- [ ] UI flow for overriding or substituting before a fork runs.
 
-**Goal:** Something Ayush can show any interviewer with pride.
+**Interactive replay / fork (reduced scope from v0.1)**
+- [ ] "Fork from this step" button.
+- [ ] Worker calls the user's registered replay endpoint with reconstructed history + overrides; spans flow back and render alongside the original.
 
-- [ ] README polish: architecture diagram, 30-second demo GIF, one-command install.
-- [ ] Documentation site — lightweight, probably Nextra. Core pages: Quickstart, SDK reference, Self-hosting, Concepts (runs vs spans vs traces).
-- [ ] GitHub Actions CI: lint, type-check, test, multi-arch Docker builds on every PR.
-- [ ] Playwright E2E suite covering the five critical flows.
-- [ ] Landing page: `halley.dev` (or whatever domain we grab) with a hero animation and a "try the demo" button.
-- [ ] Live hosted demo with real traces from Ayush's instrumented apps.
-- [ ] 3-minute YouTube demo video.
-- [ ] Blog post on `ayushwattamwar.com` about the replay/fork engineering.
-- [ ] Launch on Show HN, `r/MachineLearning`, `r/LocalLLaMA`, Twitter. Collect feedback.
-- [ ] Update resume with three tight bullets.
+**Deliverable**: the hero demo works end to end. Prompt tweak in a real commit breaks fixtures, CI fails, bisect names the commit, a 40-second video shows it.
 
-**Deliverable:** Halley is live, public, and visible.
+### Phase 6: Polish and launch (Weeks 11-12, July 22 - August 4)
 
-### Buffer phase (Weeks 13–16, August 5 – August 31)
+- [ ] README polish: architecture diagram, hero GIF (the CI failure and bisect), one-command install.
+- [ ] Docs site (Nextra or similar). Core pages: Quickstart, Concepts (cassettes, invariants, fixtures), Self-hosting, SDK reference, CLI reference, CI integration guide.
+- [ ] GitHub Actions CI for the Halley repo: lint, type-check, test, multi-arch Docker builds, Rust clippy/fmt/test.
+- [ ] GitHub App integration for fixture writes (alternative to the local-path config).
+- [ ] Playwright E2E covering three critical flows: ingest -> dashboard, turn into test, replay+bisect in CI.
+- [ ] Landing page (`halley.dev` or similar), hero animation, "try the demo" button.
+- [ ] Live hosted demo.
+- [ ] 3-minute YouTube demo video centered on the hero loop.
+- [ ] Blog post on `ayushwattamwar.com`: "How Halley turns production agent runs into deterministic regression tests."
+- [ ] Launch: Show HN, `r/MachineLearning`, `r/LocalLLaMA`, Twitter. Collect feedback.
+- [ ] Resume update: three tight bullets.
 
-**Goal:** Absorb whatever spilled from earlier phases. If nothing spilled, take on one stretch goal.
+**Deliverable**: Halley is live, public, visible. The loop is the story.
 
-**Stretch goals, pick one:**
-- Kubernetes Helm chart for self-hosters.
-- Vertex AI / AWS Bedrock instrumentation.
-- Anthropic prompt-caching and extended thinking instrumentation.
-- Python SDK stub.
-- Basic multi-tenant workspace support.
+### Buffer phase (Weeks 13-16, August 5 - August 31)
 
-Also in this window: interview prep, resume rewrite, LinkedIn refresh, outreach.
+Absorb whatever spilled. If nothing spilled, pick one stretch:
+
+- Kubernetes Helm chart.
+- Python `halley` SDK wrapping OpenTelemetry Python SDK + optional OpenLLMetry.
+- More dialects (Anthropic prompt caching, extended thinking, Google ADK).
+- Cassette diffing viewer (side-by-side recorded vs. live response).
+- Semantic invariant runner (LLM-as-judge) with cost reporting.
+
+Also: interview prep, resume rewrite, LinkedIn refresh, outreach.
 
 ---
 
 ## What could go wrong (and how we prevent it)
 
-1. **Rust learning curve eats week 2.** Mitigation: ship the hello-world Rust ingester in week 1 even if it's ugly, so we hit real Rust problems early. Do not attempt "idiomatic" Rust on day 1.
-2. **OTEL compliance becomes a rabbit hole.** Mitigation: target the GenAI conventions specifically, and only validate the fields we use. Full OTEL conformance is explicitly not a goal.
-3. **Replay/fork is harder than we think.** Mitigation: cut it from Phase 5 to Phase 6 (after launch) if Week 9 ends and it's not working. The launch ships without replay; replay becomes a "coming soon" feature we blog about separately.
-4. **Dashboard grows into a design project.** Mitigation: shadcn/ui components, no custom design system. Functional over beautiful for v1.
-5. **Ayush burns out.** Mitigation: Sundays off. Seriously.
+1. **Rust learning curve eats Week 2.** Mitigation: ship the hello-world ingester in Week 1 even if ugly. Hit real Rust problems early. No chasing idiomatic purity on day 1.
+2. **Normalizer becomes a rabbit hole.** Mitigation: scope to four dialects, property tests prove correctness, unknown attributes preserved not normalized. Do not target full OTEL conformance.
+3. **Invariant inference produces noisy proposals.** Mitigation: structural + schema + metric invariants are deterministic and tight. Semantic invariant is off by default. User reviews every proposal before save.
+4. **Cassette matching is brittle when prompts change frequently.** Mitigation: hybrid mode is the default for PR replays. Pure mode only when no inputs drifted. Cost impact of hybrid replay is bounded and reported.
+5. **Bisect is harder than it looks (non-monotonic regressions, flaky invariants).** Mitigation: bisect runs each candidate commit three times; a flaky invariant triggers a "widen semantic bounds" prompt in the UI before bisect proceeds.
+6. **A competitor (Langfuse, Laminar) ships this first.** Possible. Mitigation: ship the loop fast, open source, make the fixture format portable so fixtures outlive any one platform.
+7. **Halley SDK compatibility churn.** Mitigation: SDK is optional. OTLP is the contract. Any OTEL-instrumented stack works.
+8. **Ayush burns out.** Mitigation: Sundays off. Seriously. Non-negotiable.
 
 ---
 
 ## Weekly rhythm
 
-- **Mon–Fri:** 4–6 hrs/day focused building. No meetings on Tuesday and Thursday mornings (deep work blocks).
-- **Saturday:** 2 hrs to update docs, clean commits, push everything.
-- **Sunday:** off.
-
-End of every Friday, update this file's revision log with what shipped, what slipped, and why.
+- **Mon-Fri**: 4-6 hrs/day building. Deep-work blocks Tue/Thu mornings, no meetings.
+- **Saturday**: 2 hrs doc updates, commit cleanup, push. Update this file's revision log.
+- **Sunday**: off.
 
 ---
 
 ## Revision log
 
-| Date | Change | Why |
-|---|---|---|
-| 2026-05-13 | Initial version | Project kickoff |
+| Date | Version | Change | Why |
+|---|---|---|---|
+| 2026-05-13 | 0.1 | Initial plan | Project kickoff |
+| 2026-05-13 | 0.2 | Pivoted hero thesis to "production runs become regression tests." Phase 2 now centers the normalizer with property tests. Phase 5 rebuilt around cassette capture, invariant inference, halley CLI, replay modes, bisect, tool-effect-safe fork. Dashboard scope in Phase 4 tightened. Added `halley` CLI and GitHub Action as first-class deliverables. | May 13 research showed original differentiators (OTLP-native ingest, agent replay) were already shipped by Langfuse v4 and Laminar. Repositioned around the production-to-regression loop no one closes today. |

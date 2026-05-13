@@ -14,6 +14,9 @@ target/
 Cargo.lock
 **/*.rs.bk
 *.pdb
+# Commit Cargo.lock for the ingester binary crate (Rust official guidance
+# for reproducible binary builds). See docs/DECISIONS.md D4.
+!ingester/Cargo.lock
 
 # ---------- Node / TypeScript ----------
 node_modules/
