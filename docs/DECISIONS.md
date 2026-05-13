@@ -125,8 +125,8 @@ when `start_time` is `DateTime64(9, 'UTC')`. Fix: wrap with
 `toDateTime()`: `TTL toDateTime(start_time) + INTERVAL 30 DAY`.
 Same fix applied to `observation_body.first_seen_at`. This is a
 ClickHouse 24.x behaviour; the ARCHITECTURE doc's schema sketch did not
-include the cast. The cast is lossless for TTL purposes (second-level
-granularity is sufficient for a 30-day expiry).
+include the cast. The cast is lossless for TTL purposes: toDateTime()
+truncates to second-level granularity, which is sufficient for a 30-day expiry.
 
 ### D12. ClickHouse SQL parser rejects inline `--` comments inside VALUES
 `INSERT INTO ... VALUES (...), -- comment` causes a parse error:
@@ -265,3 +265,34 @@ re-introduce the break.
 This is dumb but common: the modern `url` / `idna` stack drags in the
 full ICU crate family, which pushes MSRV whenever `icu4x` does. Logged
 so it doesn't look like randomness.
+
+---
+
+## 2026-05-18 — Day 6 insert path
+
+### D22. Canonical JSON for body hashing: recursive key-sort, NOT RFC 8785
+Bodies are hashed after serializing to a canonical form defined as:
+1. Recursively sort all object keys alphabetically (Unicode code-point order).
+2. Compact output — no whitespace between tokens.
+3. Leave numbers as `serde_json::Number` — no float normalization, no
+   integer coercion, no exponent rewriting.
+
+This is intentionally simpler than RFC 8785 (JCS). JCS additionally
+normalizes floating-point numbers to IEEE 754 decimal representation,
+which requires a non-trivial algorithm and a dependency we do not want
+in Week 1. Our bodies are LLM request/response JSON; numbers in those
+payloads are token counts, temperatures, and costs — all of which
+round-trip through `serde_json::Number` without loss.
+
+Acceptance bar: two bodies that differ only in key order must hash the
+same. Verified by the `canonical_json_key_order` unit test in
+`ingester/src/domain/span.rs`.
+
+RFC 8785 is deferred to whenever we need cross-language hash
+compatibility (e.g. the TypeScript SDK computing hashes that must match
+the Rust ingester's). At that point the cost is adding one crate and
+updating this entry. The rule is pinned in a code comment above
+`canonicalize_json()` in `domain/span.rs` so it cannot be missed.
+
+### D23. hello-span.json fixture timestamp corrected from 1747148400000000000 (May 13, 2025) to 1778655600000000000 (May 13, 2026)
+The original value in the plan was a typo — the plan was authored on May 13, 2026 but the timestamp decoded to one year prior. TTL is 30 days so the stale timestamp caused ClickHouse to immediately expire the row after insert, making count() return 0.

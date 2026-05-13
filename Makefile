@@ -47,9 +47,7 @@ ready:
 	exit 1
 
 smoke:
-	@echo "Smoke test not yet implemented (Week 1 Day 7)."
-	@echo "Stub: exits 0 so make target exists from Day 1."
-	@exit 0
+	bash ingester/tests/smoke.sh
 
 fmt:
 	cd ingester && cargo fmt --all
