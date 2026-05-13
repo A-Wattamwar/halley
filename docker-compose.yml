@@ -99,32 +99,29 @@ services:
       start_period: 3s
 
   # ---------- Ingester (Week 1 Day 7) ----------
-  # Intentionally commented out until Day 7. The Rust binary does not
-  # yet exist; leaving the service stub present for reference.
-  #
-  # ingester:
-  #   build:
-  #     context: ./ingester
-  #   container_name: halley-ingester
-  #   restart: unless-stopped
-  #   env_file: .env
-  #   ports:
-  #     - "4318:4318"
-  #   depends_on:
-  #     clickhouse:
-  #       condition: service_healthy
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #   healthcheck:
-  #     # Use curl, NOT `wget --spider`: Alpine busybox wget does not
-  #     # support --spider. See docs/DECISIONS.md D10 and D15.
-  #     test: ["CMD", "curl", "-fsS", "http://localhost:4318/healthz"]
-  #     interval: 5s
-  #     timeout: 3s
-  #     retries: 10
-  #     start_period: 5s
+  ingester:
+    build:
+      context: ./ingester
+    container_name: halley-ingester
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "4318:4318"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # Use curl, NOT `wget --spider`: Alpine busybox wget does not
+      # support --spider. See docs/DECISIONS.md D10 and D15.
+      test: ["CMD", "curl", "-fsS", "http://localhost:4318/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 5s
 
 volumes:
   clickhouse-data:
