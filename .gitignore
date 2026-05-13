@@ -1,0 +1,52 @@
+# ---------- OS ----------
+.DS_Store
+Thumbs.db
+
+# ---------- Editors ----------
+.vscode/
+.idea/
+*.swp
+*.swo
+.kiro/
+
+# ---------- Rust ----------
+target/
+Cargo.lock
+**/*.rs.bk
+*.pdb
+
+# ---------- Node / TypeScript ----------
+node_modules/
+dist/
+build/
+.next/
+out/
+*.tsbuildinfo
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ---------- Env / Secrets ----------
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# ---------- Docker / Local data ----------
+.data/
+data/
+volumes/
+*.sqlite
+*.db
+
+# ---------- Test / Coverage ----------
+coverage/
+.nyc_output/
+*.lcov
+
+# ---------- Logs ----------
+logs/
+*.log
