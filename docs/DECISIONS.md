@@ -296,3 +296,67 @@ updating this entry. The rule is pinned in a code comment above
 
 ### D23. hello-span.json fixture timestamp corrected from 1747148400000000000 (May 13, 2025) to 1778655600000000000 (May 13, 2026)
 The original value in the plan was a typo — the plan was authored on May 13, 2026 but the timestamp decoded to one year prior. TTL is 30 days so the stale timestamp caused ClickHouse to immediately expire the row after insert, making count() return 0.
+
+---
+
+## 2026-05-18 — Week 2 Day 1 migration tooling + dashboard scaffold
+
+### D24. Migration tooling: dbmate over refinery / custom runner
+Picked **dbmate** (`ghcr.io/amacneil/dbmate`) as the sole migration runner
+for both ClickHouse and Postgres. Supersedes the Week 1 `initdb.d` volume
+mounts (D5, D13), which have been removed from `docker-compose.yml`.
+
+Reasons:
+- Single binary, no runtime dep, language-agnostic.
+- SQL-file based: migrations are plain `.sql`, readable, diffable, reviewable.
+- Supports both ClickHouse (via native protocol, port 9000) and Postgres.
+- Runs as a one-shot container in compose (`restart: "no"`), not a daemon.
+- Tracks applied migrations in a `schema_migrations` table per database;
+  skips already-applied migrations on subsequent boots (idempotent).
+- Does not require embedding migration logic in the Rust binary (refinery's
+  model), keeping the ingester's dep tree lean.
+
+Known limitation — **one SQL statement per migration file for ClickHouse**:
+dbmate's ClickHouse driver sends each `-- migrate:up` block as a single
+SQL string. ClickHouse rejects multi-statement strings with "Multi-statements
+are not allowed." DDL and DML must be in separate files. This is why
+`pricing_versions` is split into `20260513000003_pricing_versions.sql`
+(CREATE TABLE) and `20260513000004_pricing_seed.sql` (INSERT INTO).
+Postgres does not have this limitation, but we follow the same convention
+for consistency.
+
+Migration file layout:
+```
+db/
+├── clickhouse/migrations/   ← dbmate reads from here
+│   ├── 20260513000001_observations.sql
+│   ├── 20260513000002_observation_body.sql
+│   ├── 20260513000003_pricing_versions.sql
+│   └── 20260513000004_pricing_seed.sql
+└── postgres/migrations/     ← dbmate reads from here
+    ├── 20260513000001_users.sql
+    ├── 20260513000002_projects.sql
+    ├── 20260513000003_api_keys.sql
+    ├── 20260513000004_fixtures.sql
+    ├── 20260513000005_bisect_jobs.sql
+    └── 20260513000006_dev_seed.sql
+```
+
+The original `infra/clickhouse/migrations/` and `infra/postgres/migrations/`
+files remain in the repo as historical reference but are no longer mounted
+into containers. The `infra/clickhouse/init/000_create_database.sh` is also
+no longer mounted — the ClickHouse image creates the database named in
+`CLICKHOUSE_DB` automatically on startup.
+
+The ingester's `depends_on` now includes `migrate-clickhouse` and
+`migrate-postgres` with `condition: service_completed_successfully`, so
+the ingester only starts after migrations have been applied.
+
+### D25. Dashboard healthcheck uses 127.0.0.1, not localhost
+The compose healthcheck for the dashboard uses `wget -qO- http://127.0.0.1:3000`
+rather than `http://localhost:3000`. Inside the `node:20-alpine` container,
+`localhost` does not reliably resolve to `127.0.0.1` when the `HOSTNAME`
+environment variable is set to `0.0.0.0` (which is needed to bind the
+Next.js server to all interfaces). Using the literal loopback address
+bypasses the hostname resolution issue. The server itself binds correctly
+to `0.0.0.0:3000` and is reachable from the host at `localhost:3000`.

@@ -143,7 +143,13 @@ else
     # Not incrementing FAIL: eventual dedup is documented behaviour.
 fi
 
-# ---- 6. Summary -------------------------------------------------------------
+# ---- 6. Dashboard reachability check ---------------------------------------
+
+echo "==> Checking dashboard is reachable at http://localhost:3000..."
+dash_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000)
+assert_eq "dashboard HTTP status" "200" "$dash_status"
+
+# ---- 7. Summary -------------------------------------------------------------
 
 echo ""
 echo "==> Smoke test complete: ${PASS} passed, ${FAIL} failed."

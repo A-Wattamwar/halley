@@ -4,11 +4,7 @@
 //! inserts into ClickHouse. Returns 202 on success, 400 on validation
 //! failure, 500 on storage failure.
 
-use crate::{
-    domain::span::RawSpan,
-    errors::IngestError,
-    http::AppState,
-};
+use crate::{domain::span::RawSpan, errors::IngestError, http::AppState};
 use axum::{
     extract::{Json, State},
     http::StatusCode,

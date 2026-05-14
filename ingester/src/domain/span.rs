@@ -209,14 +209,10 @@ impl TryFrom<RawSpan> for (ObservationRow, Vec<BodyRow>) {
 
         let mut body_rows: Vec<BodyRow> = Vec::new();
 
-        let input_body_hash =
-            hash_body(raw.input_body, project_id, now_us, &mut body_rows);
-        let output_body_hash =
-            hash_body(raw.output_body, project_id, now_us, &mut body_rows);
-        let tool_input_hash =
-            hash_body(raw.tool_input, project_id, now_us, &mut body_rows);
-        let tool_output_hash =
-            hash_body(raw.tool_output, project_id, now_us, &mut body_rows);
+        let input_body_hash = hash_body(raw.input_body, project_id, now_us, &mut body_rows);
+        let output_body_hash = hash_body(raw.output_body, project_id, now_us, &mut body_rows);
+        let tool_input_hash = hash_body(raw.tool_input, project_id, now_us, &mut body_rows);
+        let tool_output_hash = hash_body(raw.tool_output, project_id, now_us, &mut body_rows);
 
         // --- Attributes: HashMap → sorted Vec<(String,String)> ---
         let mut attributes: Vec<(String, String)> = raw.attributes.into_iter().collect();
@@ -269,11 +265,7 @@ fn decode_hex_id<const N: usize>(s: &str, field: &'static str) -> Result<[u8; N]
     if s.len() != expected_len {
         return Err(IngestError::InvalidField {
             field,
-            reason: format!(
-                "expected {} hex chars, got {}",
-                expected_len,
-                s.len()
-            ),
+            reason: format!("expected {} hex chars, got {}", expected_len, s.len()),
         });
     }
     let bytes = hex::decode(s).map_err(|e| IngestError::InvalidField {
@@ -393,10 +385,8 @@ mod tests {
     /// Nested objects must also be sorted recursively.
     #[test]
     fn canonical_json_nested_key_order() {
-        let a: Value =
-            serde_json::from_str(r#"{"z":{"b":1,"a":2},"a":{"y":3,"x":4}}"#).unwrap();
-        let b: Value =
-            serde_json::from_str(r#"{"a":{"x":4,"y":3},"z":{"a":2,"b":1}}"#).unwrap();
+        let a: Value = serde_json::from_str(r#"{"z":{"b":1,"a":2},"a":{"y":3,"x":4}}"#).unwrap();
+        let b: Value = serde_json::from_str(r#"{"a":{"x":4,"y":3},"z":{"a":2,"b":1}}"#).unwrap();
         assert_eq!(canonicalize_json(&a), canonicalize_json(&b));
     }
 
