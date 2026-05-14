@@ -1,9 +1,8 @@
 # Halley — local development stack.
 #
-# Week 1 scope: ClickHouse, Redis, Postgres with healthchecks.
-# The ingester service is commented out until Week 1 Day 7 wires up
-# the Dockerfile. Day 2 adds migration mounts; today the stack just
-# needs to boot clean.
+# Week 2: dbmate is now the sole migration runner for both ClickHouse and
+# Postgres. The initdb.d volume mounts from Week 1 have been removed.
+# See docs/DECISIONS.md D24 for the migration tooling decision.
 #
 # Secrets: do not embed credentials here. docker compose automatically
 # loads a sibling `.env` file; `.env.example` lists the expected keys.
@@ -23,28 +22,21 @@ services:
       CLICKHOUSE_DB: ${CLICKHOUSE_DATABASE:-halley}
       # Let a blank password through in dev without tripping the image's
       # safety check. We explicitly accept this risk for local only.
+      # See docs/DECISIONS.md D14.
       CLICKHOUSE_SKIP_USER_SETUP: "1"
     ports:
       - "8123:8123"  # HTTP interface
-      - "9000:9000"  # native protocol (for clickhouse-client)
+      - "9000:9000"  # native protocol (for clickhouse-client and dbmate)
     volumes:
       - clickhouse-data:/var/lib/clickhouse
       - clickhouse-logs:/var/log/clickhouse-server
-      # ClickHouse initdb processes /docker-entrypoint-initdb.d/* (flat glob,
-      # no subdirectory recursion). Files run in sorted order on first boot.
-      # 000 is the .sh database-creation script; 001-003 are .sql migrations.
-      # See docs/DECISIONS.md D5 for the known limitation of this approach.
-      - ./infra/clickhouse/init/000_create_database.sh:/docker-entrypoint-initdb.d/000_create_database.sh:ro
-      - ./infra/clickhouse/migrations/001_observations.sql:/docker-entrypoint-initdb.d/001_observations.sql:ro
-      - ./infra/clickhouse/migrations/002_observation_body.sql:/docker-entrypoint-initdb.d/002_observation_body.sql:ro
-      - ./infra/clickhouse/migrations/003_pricing_versions.sql:/docker-entrypoint-initdb.d/003_pricing_versions.sql:ro
     ulimits:
       nofile:
         soft: 262144
         hard: 262144
     healthcheck:
       # wget --spider is not supported on the Alpine busybox wget.
-      # Use clickhouse-client per the Week 1 plan spec.
+      # Use clickhouse-client per the Week 1 plan spec. See DECISIONS.md D10.
       test: ["CMD", "clickhouse-client", "--query", "SELECT 1"]
       interval: 5s
       timeout: 3s
@@ -63,15 +55,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
-      # Postgres initdb processes /docker-entrypoint-initdb.d/* (flat glob,
-      # no subdirectory recursion). Files run in sorted order on first boot.
-      # Migrations are 001-005; seed is 006 so it runs after all tables exist.
-      - ./infra/postgres/migrations/001_users.sql:/docker-entrypoint-initdb.d/001_users.sql:ro
-      - ./infra/postgres/migrations/002_projects.sql:/docker-entrypoint-initdb.d/002_projects.sql:ro
-      - ./infra/postgres/migrations/003_api_keys.sql:/docker-entrypoint-initdb.d/003_api_keys.sql:ro
-      - ./infra/postgres/migrations/004_fixtures.sql:/docker-entrypoint-initdb.d/004_fixtures.sql:ro
-      - ./infra/postgres/migrations/005_bisect_jobs.sql:/docker-entrypoint-initdb.d/005_bisect_jobs.sql:ro
-      - ./infra/postgres/seeds/001_dev_project.sql:/docker-entrypoint-initdb.d/006_dev_project_seed.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-halley} -d $${POSTGRES_DB:-halley}"]
       interval: 5s
@@ -98,7 +81,40 @@ services:
       retries: 10
       start_period: 3s
 
-  # ---------- Ingester (Week 1 Day 7) ----------
+  # ---------- Migration runner: ClickHouse (Week 2) ----------
+  # Runs dbmate migrations against ClickHouse and exits (restart: no).
+  # Uses the native protocol port (9000) as required by dbmate's
+  # ClickHouse driver. See docs/DECISIONS.md D24.
+  migrate-clickhouse:
+    image: ghcr.io/amacneil/dbmate:latest
+    container_name: halley-migrate-clickhouse
+    restart: "no"
+    environment:
+      DATABASE_URL: "clickhouse://${CLICKHOUSE_USER:-default}:${CLICKHOUSE_PASSWORD:-}@clickhouse:9000/${CLICKHOUSE_DATABASE:-halley}"
+    volumes:
+      - ./db/clickhouse/migrations:/db/migrations
+    command: ["--no-dump-schema", "up"]
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+
+  # ---------- Migration runner: Postgres (Week 2) ----------
+  # Runs dbmate migrations against Postgres and exits (restart: no).
+  # See docs/DECISIONS.md D24.
+  migrate-postgres:
+    image: ghcr.io/amacneil/dbmate:latest
+    container_name: halley-migrate-postgres
+    restart: "no"
+    environment:
+      DATABASE_URL: "postgres://${POSTGRES_USER:-halley}:${POSTGRES_PASSWORD:-halley}@postgres:5432/${POSTGRES_DB:-halley}?sslmode=disable"
+    volumes:
+      - ./db/postgres/migrations:/db/migrations
+    command: ["--no-dump-schema", "up"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  # ---------- Ingester ----------
   ingester:
     build:
       context: ./ingester
@@ -114,6 +130,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate-clickhouse:
+        condition: service_completed_successfully
+      migrate-postgres:
+        condition: service_completed_successfully
     healthcheck:
       # Use curl, NOT `wget --spider`: Alpine busybox wget does not
       # support --spider. See docs/DECISIONS.md D10 and D15.
@@ -122,6 +142,30 @@ services:
       timeout: 3s
       retries: 10
       start_period: 5s
+
+  # ---------- Dashboard (Week 2 Day 3) ----------
+  dashboard:
+    build:
+      context: ./dashboard
+    container_name: halley-dashboard
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "3000:3000"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      ingester:
+        condition: service_healthy
+    healthcheck:
+      # node:20-alpine has busybox wget. Use 127.0.0.1 explicitly —
+      # 'localhost' may not resolve correctly inside the container when
+      # HOSTNAME is set to 0.0.0.0. See DECISIONS.md D25.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
 volumes:
   clickhouse-data:

@@ -206,3 +206,5 @@ Also: interview prep, resume rewrite, LinkedIn refresh, outreach.
 |---|---|---|---|
 | 2026-05-13 | 0.1 | Initial plan | Project kickoff |
 | 2026-05-13 | 0.2 | Pivoted hero thesis to "production runs become regression tests." Phase 2 now centers the normalizer with property tests. Phase 5 rebuilt around cassette capture, invariant inference, halley CLI, replay modes, bisect, tool-effect-safe fork. Dashboard scope in Phase 4 tightened. Added `halley` CLI and GitHub Action as first-class deliverables. | May 13 research showed original differentiators (OTLP-native ingest, agent replay) were already shipped by Langfuse v4 and Laminar. Repositioned around the production-to-regression loop no one closes today. |
+| 2026-05-18 | 0.3 | Week 1 complete. Phase 1 ingester fully shipped (insert path, Dockerfile, smoke test). All Week 1 checklist items done. | Ran ahead of schedule; shipped insert path and Dockerfile in Week 1 instead of leaving for Week 2. |
+| 2026-05-19 | 0.4 | Week 2 complete. Dashboard placeholder, dbmate migration tooling, research notes. Phase 1 deliverable met. | |

@@ -1,18 +1,20 @@
-.PHONY: up down logs smoke clean fmt lint ps ready help
+.PHONY: up down logs smoke clean fmt lint ps ready help dashboard-dev dashboard-build
 
 # Default target: show available commands.
 help:
 	@echo "Halley — local dev targets"
 	@echo ""
-	@echo "  make up       Start the full compose stack in the background"
-	@echo "  make down     Stop the stack (preserves volumes)"
-	@echo "  make clean    Stop the stack and remove volumes (destroys data)"
-	@echo "  make logs     Tail logs from all services"
-	@echo "  make ps       Show compose service status"
-	@echo "  make ready    Wait until all services report healthy"
-	@echo "  make smoke    Run the ingester smoke test (Week 1 Day 7)"
-	@echo "  make fmt      Format Rust sources in ingester/"
-	@echo "  make lint     Run clippy on ingester/ (deny warnings)"
+	@echo "  make up               Start the full compose stack in the background"
+	@echo "  make down             Stop the stack (preserves volumes)"
+	@echo "  make clean            Stop the stack and remove volumes (destroys data)"
+	@echo "  make logs             Tail logs from all services"
+	@echo "  make ps               Show compose service status"
+	@echo "  make ready            Wait until all services report healthy"
+	@echo "  make smoke            Run the end-to-end smoke test"
+	@echo "  make fmt              Format Rust sources in ingester/"
+	@echo "  make lint             Run clippy on ingester/ (deny warnings)"
+	@echo "  make dashboard-dev    Run Next.js dev server (outside Docker)"
+	@echo "  make dashboard-build  Build the Next.js production bundle"
 
 up:
 	docker compose up -d
@@ -54,3 +56,9 @@ fmt:
 
 lint:
 	cd ingester && cargo clippy --all-targets -- -D warnings
+
+dashboard-dev:
+	cd dashboard && npm run dev
+
+dashboard-build:
+	cd dashboard && npm run build

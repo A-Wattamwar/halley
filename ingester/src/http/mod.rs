@@ -4,7 +4,10 @@ pub mod health;
 pub mod spans;
 
 use crate::storage::clickhouse::ClickHouseStore;
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 use tower_http::{
     classify::{ServerErrorsAsFailures, SharedClassifier},
     trace::{DefaultMakeSpan, DefaultOnFailure, DefaultOnResponse, TraceLayer},

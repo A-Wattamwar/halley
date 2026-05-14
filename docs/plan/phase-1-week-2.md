@@ -394,3 +394,79 @@ The ClickHouse variables already exist. The dashboard reads them from the same `
 ## When to stop
 
 Week 2 is done when every checkbox above passes. If it finishes early, do not start Phase 2. Use the time to deepen the research notes or clean up the dashboard's Tailwind styling. Write the Week 2 retro at the bottom of this file.
+
+---
+
+## Week 2 retro
+
+### What shipped
+
+Everything in scope landed. dbmate is now the sole migration runner for both
+ClickHouse and Postgres — the initdb.d volume mounts are gone, migrations live
+in `db/clickhouse/migrations/` and `db/postgres/migrations/`, and the ingester
+depends on both migration containers completing before it starts. The Next.js 14
+dashboard scaffold is wired into compose with a multi-stage Dockerfile, standalone
+output, non-root user, and a working healthcheck. The spans table page queries
+ClickHouse directly in a Server Component and renders a live table of
+observations. Three research files landed under `docs/research/` covering the
+OTEL GenAI semconv, Langfuse v4, and Laminar — each with concrete Phase 2
+takeaways. The smoke test grew from 8 to 9 assertions (dashboard reachability
+added). ROADMAP.md revision log updated to v0.4. `make dashboard-dev` and
+`make dashboard-build` added to the Makefile.
+
+### What slipped
+
+Nothing. Every checkbox in the reviewer checklist is satisfied. The only item
+that required a mid-day decision was the dbmate multi-statement issue (see
+below), which was resolved the same day without slipping the timeline.
+
+### What surprised me
+
+**dbmate ClickHouse multi-statement limitation.** dbmate's ClickHouse driver
+sends each `-- migrate:up` block as a single SQL string. ClickHouse rejects
+multi-statement strings with "Multi-statements are not allowed." The first two
+migrations (DDL only) applied fine; the third failed because it combined
+`CREATE TABLE` and `INSERT INTO` in one file. Fix: split into two files — one
+DDL, one DML. This is now the documented convention for all future ClickHouse
+migrations (D24). Postgres does not have this restriction.
+
+**`localhost` vs `127.0.0.1` in the dashboard healthcheck.** Inside the
+`node:20-alpine` container, `localhost` does not reliably resolve to `127.0.0.1`
+when `HOSTNAME=0.0.0.0` is set (which is needed to bind Next.js to all
+interfaces). The healthcheck was failing with "connection refused" even though
+the server was running and reachable from the host. Switching to `127.0.0.1`
+explicitly fixed it. Documented as D25.
+
+**Docker Desktop storage corruption.** During Day 3, Docker Desktop's BuildKit
+metadata database became corrupted (persistent I/O errors on
+`metadata_v2.db`). This blocked all image builds for several hours. Required
+manually deleting the Docker VM data directory and restarting Docker Desktop.
+Not a code issue, but worth noting: if builds start failing with
+`write /var/lib/docker/buildkit/containerd-overlayfs/metadata_v2.db: input/output error`,
+the fix is to delete `~/Library/Containers/com.docker.docker/Data/vms` and
+restart Docker Desktop.
+
+**Next.js static pre-rendering.** Without `export const dynamic = "force-dynamic"`,
+Next.js 14 pre-renders the spans table at build time (baking in whatever rows
+exist at that moment). For a dev observability tool, stale cached HTML is wrong.
+Adding `force-dynamic` makes every request hit ClickHouse fresh. The route
+shows `ƒ` (dynamic) in the build output, confirming it.
+
+### What the reviewer should look at first
+
+1. **`docker compose down -v && docker compose up -d && make ready && make smoke`** —
+   the full end-to-end path. All five services should come up healthy and 9/9
+   smoke assertions should pass.
+
+2. **`db/clickhouse/migrations/` and `db/postgres/migrations/`** — the new
+   dbmate migration files. Verify the split between DDL and DML files for
+   ClickHouse, and that the Postgres dev seed is migration 006 (runs after all
+   tables exist).
+
+3. **`dashboard/src/app/page.tsx`** — the spans table Server Component. Check
+   that it has `export const dynamic = "force-dynamic"`, no `"use client"`, and
+   the exact query from the plan.
+
+4. **`docs/research/`** — the three research files. These are the inputs for
+   Phase 2 normalizer scoping. The Phase 2 takeaway sections are the most
+   important part.

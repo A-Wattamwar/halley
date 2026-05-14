@@ -4,9 +4,9 @@
 //! Day 6: `insert_bodies()` and `insert_observation()` for the span handler.
 
 use crate::{
+    config::Config,
     domain::span::{BodyRow, ObservationRow},
     errors::IngestError,
-    config::Config,
 };
 use std::time::Duration;
 use tokio::time::timeout;

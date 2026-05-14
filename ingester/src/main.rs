@@ -58,13 +58,18 @@ async fn main() -> anyhow::Result<()> {
 /// Install a tracing subscriber. JSON when config says so, human
 /// otherwise. Respects `RUST_LOG`; falls back to `INGESTER_LOG_LEVEL`.
 fn init_tracing(cfg: &Config) {
-    let filter = EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| EnvFilter::new(cfg.log_level.clone()));
+    let filter =
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(cfg.log_level.clone()));
 
     if cfg.log_json {
         tracing_subscriber::registry()
             .with(filter)
-            .with(fmt::layer().json().with_current_span(true).with_span_list(false))
+            .with(
+                fmt::layer()
+                    .json()
+                    .with_current_span(true)
+                    .with_span_list(false),
+            )
             .init();
     } else {
         tracing_subscriber::registry()
