@@ -1,4 +1,4 @@
-.PHONY: up down logs smoke clean fmt lint ps ready help dashboard-dev dashboard-build
+.PHONY: up down logs smoke clean fmt lint ps ready load-test help dashboard-dev dashboard-build
 
 # Default target: show available commands.
 help:
@@ -13,7 +13,7 @@ help:
 	@echo "  make smoke            Run the end-to-end smoke test"
 	@echo "  make fmt              Format Rust sources in ingester/"
 	@echo "  make lint             Run clippy on ingester/ (deny warnings)"
-	@echo "  make dashboard-dev    Run Next.js dev server (outside Docker)"
+	@echo "  make load-test        Run the k6 HTTP load test (5K RPS, 5 min)"
 	@echo "  make dashboard-build  Build the Next.js production bundle"
 
 up:
@@ -62,3 +62,13 @@ dashboard-dev:
 
 dashboard-build:
 	cd dashboard && npm run build
+
+# Run the k6 HTTP load test against the running stack.
+# Uses --network halley_default so k6 can reach halley-ingester by hostname.
+# macOS Docker Desktop does not support --network=host; use the compose network.
+# See DECISIONS.md D36 for methodology and results.
+load-test:
+	docker run --rm \
+		--network halley_default \
+		-v "$(PWD)/loadtest:/scripts" \
+		grafana/k6:latest run /scripts/k6-otlp-http.js

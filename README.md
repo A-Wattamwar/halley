@@ -84,16 +84,68 @@ Halley is not a Langfuse or Laminar replacement. It is the regression-testing lo
 ## Architecture at a glance
 
 ```
-Your AI app ──OTLP──▶ Rust Ingester ──▶ Redis Streams ──▶ ClickHouse
-                           │                                  │
-                           ▼                                  ▼
-                   Cassette Capture                   Next.js Dashboard
-                           │                                  │
-                           ▼                                  ▼
-                  halley/fixtures/ in your repo  ───▶  halley ci (replay + bisect)
+Your AI app (OpenLLMetry / OpenInference / Vercel AI SDK / OTEL GenAI / halley-raw)
+        │
+        │  OTLP/gRPC :4317   OTLP/HTTP :4318   POST /v1/spans/json
+        └──────────────────────────┬──────────────────────────────
+                                   ▼
+                        ┌─────────────────────┐
+                        │   Rust Ingester      │
+                        │                     │
+                        │  ┌───────────────┐  │
+                        │  │  Normalizer   │  │
+                        │  │               │  │
+                        │  │ halley-raw    │  │
+                        │  │ openllmetry   │  │
+                        │  │ openinference │  │
+                        │  │ vercel-ai     │  │
+                        │  │ otel-genai    │  │
+                        │  └──────┬────────┘  │
+                        └─────────┼───────────┘
+                                  │ CanonicalSpan
+                                  ▼
+                        Redis Streams (halley:spans)
+                                  │
+                                  ▼
+                        ┌─────────────────────┐
+                        │   Writer Task        │
+                        │  (same binary)       │
+                        └─────────┬───────────┘
+                                  │
+                    ┌─────────────┴──────────────┐
+                    ▼                            ▼
+             ClickHouse                      Postgres
+         (observations,                  (auth, projects,
+          bodies, pricing)                API keys, jobs)
+                    │                            │
+                    └─────────────┬──────────────┘
+                                  ▼
+                        Next.js Dashboard
+                                  │
+                                  ▼
+                    halley/fixtures/ in your repo
+                                  │
+                                  ▼
+                    halley ci (replay + bisect)
 ```
 
 Full system design in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+---
+
+## Supported instrumentation
+
+Halley normalizes spans from five dialects into a single canonical schema. No code changes required — point your existing OTLP exporter at the ingester.
+
+| Dialect | Detection | Status | Adapter |
+|---|---|---|---|
+| halley-raw | `source_dialect = "halley-raw"` field | ✅ Stable | [halley_raw.rs](ingester/src/normalizer/halley_raw.rs) |
+| OpenLLMetry / Traceloop | any `traceloop.*` attribute | ✅ Supported | [openllmetry.rs](ingester/src/normalizer/openllmetry.rs) |
+| OpenInference / Phoenix | `openinference.span.kind` or `llm.model_name` | ✅ Supported | [openinference.rs](ingester/src/normalizer/openinference.rs) |
+| Vercel AI SDK | `ai.operationId` or `ai.model.*` | ✅ Supported | [vercel_ai.rs](ingester/src/normalizer/vercel_ai.rs) |
+| OTEL GenAI semconv | `gen_ai.system` or `gen_ai.provider.name` (fallback) | ✅ Supported | [otel_genai.rs](ingester/src/normalizer/otel_genai.rs) |
+
+Detection runs in priority order: halley-raw → OpenLLMetry → OpenInference → Vercel AI → OTEL GenAI. Unknown attributes from any dialect are preserved verbatim in the `attributes` map and never dropped.
 
 ---
 
@@ -126,6 +178,33 @@ docker compose up
 ```
 
 Point any OTLP-instrumented AI app at the ingester. Real agent traces start flowing. Click "Turn this run into a test" on any production run to save it into your repo's fixture library. Add `halley ci` to your existing test workflow.
+
+---
+
+## Performance
+
+Single-node HTTP ingest load test (Phase 2, Week 4).
+
+| Metric | Result |
+|---|---|
+| **Achieved sustained RPS** | **4,792 spans/sec** |
+| p50 latency | 1.69 ms |
+| p95 latency | 113.93 ms |
+| p99 latency | 185.15 ms |
+| Error rate | 0.00% |
+| Test duration | 5 minutes |
+| Total spans ingested | 1,438,636 |
+| ClickHouse rows written | 1,438,636 (0 data loss) |
+
+**Hardware:** Apple M2, 8 GB RAM, Docker Desktop (all services co-located).
+
+**Bottleneck:** The ingester receiver is not the bottleneck — the 5-second sanity check achieved ~9K RPS with 5 VUs. At 5K RPS sustained, the ClickHouse writer becomes the constraint: batch inserts at 100ms intervals with a single writer task limit throughput to ~4.8K spans/sec. The Redis stream absorbed the burst (peak lag ~1.48M entries) and the writer drained all entries with 0 data loss after the test ended. p99 latency exceeded the 50ms target because the Redis `XADD` call occasionally queues behind the writer's batch flush.
+
+**Reproduce:**
+```bash
+docker compose up -d && make ready
+make load-test
+```
 
 ---
 

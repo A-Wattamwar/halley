@@ -579,3 +579,205 @@ rather than a `[[test]]` target. Reasons:
 which is called by both `http/otlp.rs` and `grpc/otlp.rs`. This avoids
 duplicating the ResourceSpans → ScopeSpans → Span iteration loop and ensures
 both receivers produce identical canonical rows for equivalent payloads.
+
+---
+
+## 2026-05-15 — Phase 2 Week 4 Day 1
+
+### D31 update — adapter Vec order extended with openinference and vercel-ai
+
+**Supersedes the D31 "Updated Day 4" note.** The complete and current adapter
+registration order as of Week 4 Day 1 is:
+
+1. **halley-raw**: `source_dialect = "halley-raw"` attribute. Explicit opt-in
+   from `/v1/spans/json`; must be first to avoid misclassification.
+2. **openllmetry**: any `traceloop.*` attribute key. More specific than OTEL
+   GenAI; must precede it.
+3. **openinference** (Day 1): `openinference.span.kind` OR `llm.model_name`.
+   Must come before otel-genai because OpenInference spans may also carry
+   `gen_ai.*` attributes in mixed instrumentations. A span with both
+   `traceloop.*` and `openinference.*` resolves to openllmetry (earlier in Vec).
+4. **vercel-ai** (Day 2): `ai.operationId` OR any `ai.model.*` / `ai.usage.*`
+   attribute. Must come before otel-genai for the same reason as openinference.
+5. **otel-genai**: `gen_ai.system` or `gen_ai.provider.name`. Fallback for any
+   GenAI span not claimed by a more specific adapter.
+6. **fallback**: `NormalizeError::UnknownDialect`. Span is not dropped.
+
+Detection priority is documented in a code comment above `Normalizer::new()`
+in `normalizer/mod.rs`.
+
+### D32 update — three OTLP fixtures
+
+The file `ingester/fixtures/otlp-openinference-trace.bin` was added on Week 4
+Day 1. The generation function is `generate_otlp_openinference_fixture()` in
+`ingester/tests/gen_otlp_fixture.rs`.
+
+Current fixture inventory:
+- `otlp-genai-trace.bin` (349 bytes) — OTEL GenAI span
+- `otlp-openllmetry-trace.bin` (463 bytes) — OpenLLMetry span
+- `otlp-openinference-trace.bin` — OpenInference LLM span
+
+A fourth fixture (`otlp-vercel-ai-trace.bin`) will be added on Day 2.
+
+### D37. OpenInference `llm.system` vs `llm.provider` — live spec is the source of truth
+
+The Week 4 plan (`phase-2-week-4.md`) originally listed `llm.provider or llm.system`
+as the attribute for `gen_ai_system`. The live OpenInference spec
+(github.com/Arize-ai/openinference/blob/main/spec/llm_spans.md, verified
+2026-05-15) uses `llm.system` exclusively:
+
+> "llm.system: The AI system/product (e.g., 'openai', 'anthropic')"
+
+`llm.provider` does not appear in the live spec. The adapter uses `llm.system`
+only. The plan doc has been corrected to remove the ambiguity.
+
+### D38. OpenInference `llm.invocation_parameters` — preserve in attributes
+
+`llm.invocation_parameters` is a JSON string of model parameters (temperature,
+max_tokens, etc.) emitted by OpenInference instrumentations. It has no
+corresponding canonical field in `CanonicalSpan`. Rather than silently dropping
+it, the adapter explicitly re-inserts it into `CanonicalSpan.attributes` after
+the unknown-key pass. This preserves the data for downstream consumers (dashboard,
+fixture replay) without polluting the canonical schema.
+
+### D39. OpenInference CHAIN → invoke_agent mapping
+
+`openinference.span.kind = "CHAIN"` maps to `gen_ai_operation = "invoke_agent"`,
+same as `"AGENT"`. Rationale: chains in OpenInference are orchestration roots
+(LangChain chains, LangGraph graphs) — they have the same run-grouping semantics
+as agent spans. When `is_run_root` is wired on Day 3, both `"AGENT"` and
+`"CHAIN"` will set `is_run_root = true`. This is noted in a code comment in
+`normalizer/openinference.rs` so Day 3 picks it up without re-reading this entry.
+
+---
+
+## 2026-05-15 — Phase 2 Week 4 Day 2
+
+### D31 update — vercel-ai added to adapter Vec
+
+**Supersedes the Day 1 D31 update.** Complete adapter registration order as of
+Week 4 Day 2:
+
+1. **halley-raw** — `source_dialect = "halley-raw"` attribute.
+2. **openllmetry** — any `traceloop.*` attribute key.
+3. **openinference** — `openinference.span.kind` OR `llm.model_name`.
+4. **vercel-ai** — `ai.operationId` OR `ai.model.id` OR `ai.model.provider`.
+   Must come before otel-genai: Vercel AI SDK v6 emits `gen_ai.*` attributes
+   on inner `doGenerate`/`doStream` spans alongside `ai.*` attributes.
+5. **otel-genai** — `gen_ai.system` or `gen_ai.provider.name`. Fallback.
+6. **fallback** — `NormalizeError::UnknownDialect`.
+
+### D32 update — four OTLP fixtures
+
+`ingester/fixtures/otlp-vercel-ai-trace.bin` added on Week 4 Day 2.
+Generation function: `generate_otlp_vercel_ai_fixture()` in
+`ingester/tests/gen_otlp_fixture.rs`.
+
+Current fixture inventory:
+- `otlp-genai-trace.bin` — OTEL GenAI span
+- `otlp-openllmetry-trace.bin` — OpenLLMetry span
+- `otlp-openinference-trace.bin` — OpenInference LLM span
+- `otlp-vercel-ai-trace.bin` — Vercel AI SDK generateText span
+
+### D40. Vercel AI SDK token attribute precedence: ai.usage.* over gen_ai.usage.*
+
+Vercel AI SDK v6 emits token counts in two namespaces on the same span:
+- `ai.usage.promptTokens` / `ai.usage.completionTokens` — on all LLM spans
+  (outer `ai.generateText`, `ai.streamText`, etc.)
+- `gen_ai.usage.input_tokens` / `gen_ai.usage.output_tokens` — additionally
+  on inner `doGenerate`/`doStream` spans (OTEL semconv alignment)
+
+The adapter prefers `ai.usage.*` (Vercel-native, always present) and falls
+back to `gen_ai.usage.*` (present only on inner spans). This ensures both
+outer and inner span shapes produce correct token counts without special-casing
+the span type. The fallback also means a pure `gen_ai.*`-only span (e.g. from
+a future SDK version that drops `ai.*`) would still work if it somehow passed
+detection — though in practice otel-genai would claim it first.
+
+Source verified: https://sdk.vercel.ai/docs/ai-sdk-core/telemetry (AI SDK v6,
+checked 2026-05-15).
+
+---
+
+## 2026-05-15 — Phase 2 Week 4 Day 3
+
+### D34. Write-time vs read-time run grouping
+
+**Decision:** Run grouping is split across two tiers:
+
+1. **Write-time (per-span):** `run_id = trace_id` always. `is_run_root = true` when the span explicitly declares itself an agent root via operation name or attribute (tiers 1 and 2 from the original design). This is a per-span decision with no cross-span state.
+
+2. **Read-time (dashboard query):** Trace-level aggregation ("show all traces with multiple LLM spans") is a `GROUP BY` query, not a write-time flag.
+
+**What was reconsidered:** The original ARCHITECTURE.md §3.4 described four tiers, including tier 3 ("trace with >1 LLM span → trace root is run root"). Tier 3 requires looking at sibling spans before deciding what the current span is — in a streaming pipeline this means holding a per-trace buffer with a timeout, then flushing. That is a significant operational complexity: buffer memory, timeout tuning, partial-trace handling on restart. The benefit is marginal: tier 3 traces are already queryable at read time with a simple aggregation. The cost is not worth it.
+
+**The sharper rule:** `is_run_root` is set iff the span carries an explicit agent-root signal. Traces without such a signal are still queryable as "runs of one" or as "multi-LLM traces" at read time. The dashboard's run list query is fast either way.
+
+**Schema:** `is_run_root Bool DEFAULT false` added to `halley.observations` via migration `20260520000001_observations_is_run_root.sql`. `DEFAULT false` ensures existing rows (pre-migration) get the correct value without a backfill.
+
+**Per-adapter rules:**
+- `halley-raw`: `gen_ai_operation == "invoke_agent"` OR `halley.run.kind == "agent"`
+- `otel-genai`: `gen_ai.operation.name == "invoke_agent"` OR `halley.run.kind == "agent"`
+- `openllmetry`: above OR `traceloop.span.kind == "agent"`
+- `openinference`: `gen_ai_operation == "invoke_agent"` (covers AGENT and CHAIN via span kind mapping) OR `halley.run.kind == "agent"`
+- `vercel-ai`: `ai.operationId` starts with `"ai.agent"` OR `halley.run.kind == "agent"`
+
+---
+
+## 2026-05-15 — Phase 2 Week 4 Day 4
+
+### D35. Prometheus metrics: single-server model (mounted on axum, not a separate port)
+
+The `/metrics` endpoint is mounted on the existing axum HTTP server at `:4318`
+alongside the ingest endpoints, rather than on a separate port (e.g. `:9090`).
+
+**Reasons:**
+- Simpler deployment: one port to expose, one healthcheck, one TLS termination
+  point if we add TLS later.
+- No second `TcpListener` or tokio task. The `PrometheusHandle::render()` call
+  is synchronous and cheap — it just serializes the in-memory metric state.
+- Scrape traffic is negligible compared to ingest traffic; no isolation needed.
+- The `TraceLayer` on the axum router logs `/metrics` requests like any other
+  request, which is fine — scrape requests are low-frequency and the logs are
+  useful for debugging.
+
+**Tradeoff acknowledged:** In a multi-tenant or high-security deployment, you
+might want metrics on a separate internal port so the scrape endpoint is not
+reachable from the public ingest port. For Halley's self-hosted single-org
+model this is not a concern. If it becomes one, the fix is a second
+`TcpListener` + a second `Router` with only the `/metrics` route — a 10-line
+change.
+
+**Implementation:** `metrics-exporter-prometheus 0.16` with
+`PrometheusBuilder::new().install_recorder()`. The returned `PrometheusHandle`
+is stored in `AppState` and called in the `GET /metrics` handler.
+
+---
+
+## 2026-05-15 — Phase 2 Week 4 Day 5
+
+### D36. Load test methodology and results
+
+**Methodology:**
+- Tool: k6 `constant-arrival-rate` executor, target 5,000 RPS for 5 minutes.
+- Payload: `ingester/fixtures/otlp-genai-trace.bin` (349 bytes, one OTEL GenAI span), embedded as base64 in the k6 script.
+- Transport: OTLP/HTTP protobuf (`Content-Type: application/x-protobuf`) to `/v1/traces`.
+- Network: k6 container on `halley_default` Docker network, targeting `http://halley-ingester:4318/v1/traces`. macOS Docker Desktop does not support `--network=host`; the compose network is the correct approach.
+- Single run, no tuning iterations (achieved > 1K RPS threshold).
+
+**Hardware:** Apple M2, 8 GB RAM, Docker Desktop (all services co-located on the same host).
+
+**Results:**
+- Achieved sustained RPS: **4,792 spans/sec** (95.8% of 5K target)
+- p50 latency: 1.69 ms
+- p95 latency: 113.93 ms
+- p99 latency: 185.15 ms
+- Error rate: 0.00% (1,438,636 / 1,438,636 requests succeeded)
+- Dropped iterations: 61,389 (k6 could not schedule them within the rate limit — VU pool exhausted at peak)
+- Peak Redis stream lag: ~1.48M entries (writer lagged behind ingest rate during the test)
+- Post-test drain: writer drained all 1.48M entries with 0 data loss (XPENDING = 0 after drain)
+- ClickHouse rows: 1,438,636 otel-genai rows from the load test (exact match to k6 successful requests)
+
+**Bottleneck:** The ingester receiver is not the bottleneck — a 5-second sanity check with 5 VUs achieved ~9K RPS. At 5K RPS sustained, the single ClickHouse writer task becomes the constraint. The writer batches 500 spans or 100ms, whichever comes first; at 5K ingest RPS, the writer can only drain ~4.8K spans/sec, causing the Redis stream to grow during the test. The Redis buffer absorbed the burst correctly and the writer drained everything after the test ended. p99 latency exceeded the 50ms target because the `XADD` call occasionally queues behind the writer's batch flush under sustained load.
+
+**No tuning was performed.** The achieved rate (4,792 RPS) is above the 1K RPS threshold for iteration. The bottleneck is the single writer task; adding a second writer instance (consumer group supports it without code changes) would likely push throughput past 5K RPS.

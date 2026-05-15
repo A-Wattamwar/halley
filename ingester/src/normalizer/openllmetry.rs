@@ -214,7 +214,7 @@ impl Adapter for OpenLLMetryAdapter {
             source_dialect: "openllmetry".to_string(),
             dialect_version,
             gen_ai_system,
-            gen_ai_operation,
+            gen_ai_operation: gen_ai_operation.clone(),
             gen_ai_request_model: str_attr("gen_ai.request.model"),
             gen_ai_response_model: str_attr("gen_ai.response.model"),
             gen_ai_usage_input_tokens: u32_attr("gen_ai.usage.input_tokens"),
@@ -234,6 +234,12 @@ impl Adapter for OpenLLMetryAdapter {
             status,
             error_message: span.status_message.clone(),
             attributes: extra_attributes,
+            // is_run_root: true when this span is an agent invocation root.
+            // openllmetry rule: gen_ai.operation.name == "invoke_agent" OR
+            // halley.run.kind == "agent" OR traceloop.span.kind == "agent".
+            is_run_root: gen_ai_operation == "invoke_agent"
+                || str_attr("halley.run.kind") == "agent"
+                || str_attr("traceloop.span.kind") == "agent",
         })
     }
 }

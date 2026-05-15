@@ -151,6 +151,11 @@ impl Adapter for HalleyRawAdapter {
             status,
             error_message: str_attr("error_message"),
             attributes: extra_attributes,
+            // is_run_root: true when this span is an agent invocation root.
+            // halley-raw rule: gen_ai_operation == "invoke_agent" OR
+            // halley.run.kind attribute == "agent".
+            is_run_root: str_attr("gen_ai_operation") == "invoke_agent"
+                || str_attr("halley.run.kind") == "agent",
         })
     }
 }

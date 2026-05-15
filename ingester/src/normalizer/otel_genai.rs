@@ -193,6 +193,11 @@ impl Adapter for OtelGenAiAdapter {
             status,
             error_message: span.status_message.clone(),
             attributes: extra_attributes,
+            // is_run_root: true when this span is an agent invocation root.
+            // otel-genai rule: gen_ai.operation.name == "invoke_agent" OR
+            // halley.run.kind == "agent".
+            is_run_root: str_attr("gen_ai.operation.name") == "invoke_agent"
+                || str_attr("halley.run.kind") == "agent",
         })
     }
 }
@@ -519,5 +524,62 @@ mod tests {
             input_body.to_string().contains("hello"),
             "attribute fallback should populate input_body: {input_body}"
         );
+    }
+
+    proptest! {
+        /// is_run_root is true iff gen_ai.operation.name == "invoke_agent"
+        /// or halley.run.kind == "agent".
+        #[test]
+        fn prop_is_run_root_when_invoke_agent(
+            operation in arb_gen_ai_string(),
+        ) {
+            let span = make_otel_genai_span(
+                "openai", &operation, "gpt-4o", "gpt-4o", 10, 20, "stop",
+                BTreeMap::new(),
+            );
+            let canonical = OtelGenAiAdapter.normalize(span).expect("normalize should not fail");
+            let expected = operation == "invoke_agent";
+            prop_assert_eq!(
+                canonical.is_run_root,
+                expected,
+                "is_run_root should be {} for operation {:?}",
+                expected,
+                operation
+            );
+        }
+    }
+
+    /// is_run_root is true when halley.run.kind == "agent" regardless of operation.
+    #[test]
+    fn is_run_root_via_halley_run_kind() {
+        let mut extra = BTreeMap::new();
+        extra.insert(
+            "halley.run.kind".to_string(),
+            AnyValue::String("agent".to_string()),
+        );
+        let span =
+            make_otel_genai_span("openai", "chat", "gpt-4o", "gpt-4o", 10, 20, "stop", extra);
+        let canonical = OtelGenAiAdapter.normalize(span).unwrap();
+        assert!(
+            canonical.is_run_root,
+            "halley.run.kind=agent should set is_run_root"
+        );
+    }
+
+    /// is_run_root is false for a regular chat span.
+    #[test]
+    fn is_run_root_false_for_chat() {
+        let span = make_otel_genai_span(
+            "openai",
+            "chat",
+            "gpt-4o",
+            "gpt-4o",
+            10,
+            20,
+            "stop",
+            BTreeMap::new(),
+        );
+        let canonical = OtelGenAiAdapter.normalize(span).unwrap();
+        assert!(!canonical.is_run_root, "chat span should not be run root");
     }
 }

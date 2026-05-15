@@ -33,6 +33,7 @@ use crate::{
     pipeline::{BATCH_SIZE, BLOCK_MS, CONSUMER_GROUP, DLQ_KEY, MAX_RETRIES, STREAM_KEY},
     storage::clickhouse::ClickHouseStore,
 };
+use metrics::{counter, gauge, histogram};
 use redis::{
     streams::{StreamReadOptions, StreamReadReply},
     AsyncCommands, Client,
@@ -180,6 +181,7 @@ impl Writer {
             // PERMANENT (decode/schema): DLQ after MAX_RETRIES attempts.
             //   These will never succeed regardless of wait time.
             let mut permanent_attempt = 0u32;
+            let flush_start = std::time::Instant::now();
             let insert_outcome = loop {
                 match self
                     .ch
@@ -199,6 +201,8 @@ impl Writer {
                                 batch_size = obs_rows.len(),
                                 "writer: transient insert error, retrying (holding PEL)"
                             );
+                            counter!("halley_clickhouse_insert_errors_total", "kind" => "transient")
+                                .increment(1);
                             tokio::select! {
                                 _ = tokio::time::sleep(
                                     std::time::Duration::from_millis(backoff)
@@ -237,6 +241,8 @@ impl Writer {
                                     batch_size = obs_rows.len(),
                                     "writer: permanent insert error after max retries, DLQ'ing batch"
                                 );
+                                counter!("halley_clickhouse_insert_errors_total", "kind" => "permanent")
+                                    .increment(1);
                                 break InsertOutcome::PermanentFailure;
                             }
                         }
@@ -253,6 +259,21 @@ impl Writer {
                     {
                         warn!(error = %e, "writer: XACK failed (entries will be re-delivered)");
                     }
+
+                    // Emit batch metrics.
+                    let flush_secs = flush_start.elapsed().as_secs_f64();
+                    let batch_sz = obs_rows.len() as f64;
+                    let total_bodies = obs_rows.len(); // one body set per span
+                    let unique_bodies = deduped_bodies.len();
+                    let dedup_ratio = if total_bodies > 0 {
+                        unique_bodies as f64 / total_bodies as f64
+                    } else {
+                        1.0
+                    };
+                    histogram!("halley_writer_batch_size").record(batch_sz);
+                    histogram!("halley_writer_flush_latency_seconds").record(flush_secs);
+                    gauge!("halley_body_dedup_ratio").set(dedup_ratio);
+
                     info!(
                         batch_size = obs_rows.len(),
                         body_rows = deduped_bodies.len(),

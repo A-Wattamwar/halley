@@ -66,14 +66,19 @@ pub struct CanonicalSpan {
     pub error_message: String,
     // --- unknown keys preserved verbatim ---
     pub attributes: BTreeMap<String, String>,
+    // --- run grouping (Week 4 Day 3) ---
+    /// True if this span is the root of an agent run.
+    /// Set by each adapter based on operation name and dialect-specific markers.
+    /// Written to `ObservationRow.is_run_root` (Bool DEFAULT false column).
+    pub is_run_root: bool,
 }
 
 impl CanonicalSpan {
     /// Convert into ClickHouse-ready row types.
     ///
     /// This is the only place body hashing happens. The `run_id` is always
-    /// `trace_id` (ARCHITECTURE §3.4 — run grouping tier 4; `is_run_root`
-    /// detection is Week 4 Day 3).
+    /// `trace_id` (ARCHITECTURE §3.4). `is_run_root` is set by the adapter
+    /// and written directly to the observation row.
     pub fn into_rows(self) -> Result<(ObservationRow, Vec<BodyRow>), IngestError> {
         let now_us = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -121,6 +126,7 @@ impl CanonicalSpan {
             status: self.status,
             error_message: self.error_message,
             attributes,
+            is_run_root: self.is_run_root,
         };
 
         Ok((obs, body_rows))
