@@ -23,7 +23,9 @@ use axum::{
     extract::{Json, State},
     http::StatusCode,
 };
+use metrics::{counter, histogram};
 use serde::Serialize;
+use std::time::Instant;
 use tracing::instrument;
 
 /// Response body for a successful span ingest.
@@ -38,6 +40,8 @@ pub async fn post_span(
     State(state): State<AppState>,
     Json(raw): Json<RawSpan>,
 ) -> Result<(StatusCode, Json<Accepted>), IngestError> {
+    let start = Instant::now();
+
     // 1. Convert RawSpan → OtlpSpan (hex decode + attribute packing).
     let otlp_span = raw_span_to_otlp(raw)?;
 
@@ -50,6 +54,9 @@ pub async fn post_span(
                 field: "span",
                 reason: format!("normalize error: {e}"),
             })?;
+
+    let dialect = canonical.source_dialect.clone();
+    let unknown_attr_count = canonical.attributes.len() as u64;
 
     // 3. Hash bodies → (ObservationRow, Vec<BodyRow>).
     let (obs_row, body_rows) = canonical
@@ -68,6 +75,16 @@ pub async fn post_span(
         .map_err(|e| IngestError::Storage(format!("publish error: {e}")))?;
 
     tracing::info!(body_hash_count = body_count, "span published to stream");
+
+    // Emit metrics.
+    let elapsed = start.elapsed().as_secs_f64();
+    histogram!("halley_ingest_latency_seconds", "path" => "http").record(elapsed);
+    counter!("halley_ingest_requests_total", "dialect" => dialect.clone(), "status" => "ok")
+        .increment(1);
+    if unknown_attr_count > 0 {
+        counter!("halley_normalizer_unknown_attributes_total", "dialect" => dialect)
+            .increment(unknown_attr_count);
+    }
 
     Ok((StatusCode::ACCEPTED, Json(Accepted { accepted: 1 })))
 }

@@ -139,7 +139,7 @@ Single Rust binary with two logical workloads: an OTLP receiver and a ClickHouse
 - **Normalize**, do not reject. Incoming spans come in several dialects; we canonicalize them into Halley's schema. See §3.3 on the normalizer.
 - Capture cassette payloads: raw request and response bodies for LLM and tool calls, stored verbatim and content-addressed (SHA-256), deduplicated in `halley.observation_body`. This is the key enabler of bit-fidelity replay.
 - Compute derived fields: latency, span kind (llm / tool / retrieval / agent-control), a pricing-version id for later cost calculation.
-- Group spans into agent runs via the four-tier heuristic in §3.4.
+- Group spans into agent runs via the write-time `is_run_root` flag described in §3.4.
 - Publish to Redis Stream `halley:spans`.
 
 **Non-responsibilities**
@@ -165,14 +165,23 @@ Source-specific adapters map incoming attribute shapes to the canonical schema. 
 
 ### 3.4 Run grouping
 
-A span is assigned a `run_id` by the first rule that matches:
+Every span gets `run_id = trace_id`. Additionally, each span carries an `is_run_root` boolean flag that identifies it as the root of an agent run.
 
-1. `gen_ai.operation.name = "invoke_agent"` on the span -> this span is a run root.
-2. `halley.run.kind = "agent"` attribute set by `@halley/sdk` or manual instrumentation -> run root.
-3. A trace containing more than one LLM-kind span -> the trace root is the run root (`run_id = trace_id`).
-4. Everything else -> `run_id = trace_id`, a run of one.
+**Write-time (per-span, no batch lookups required):**
 
-Descendants inherit the root's `run_id`. This matches how mainstream instrumentation libraries actually label spans in 2026, and degrades gracefully for naive loops that wrap nothing.
+- `run_id = trace_id` always.
+- `is_run_root = true` when any of the following match:
+  - `gen_ai.operation.name = "invoke_agent"` (tier 1 — explicit agent root per OTEL GenAI semconv)
+  - `halley.run.kind = "agent"` attribute (tier 2 — explicit override via `@halley/sdk` or manual instrumentation)
+  - Dialect-specific equivalents: `traceloop.span.kind = "agent"` (OpenLLMetry), `openinference.span.kind` in `{"AGENT", "CHAIN"}` (OpenInference), `ai.operationId` starting with `"ai.agent"` (Vercel AI SDK)
+- `is_run_root = false` for all other spans.
+
+**Read-time (dashboard queries):**
+
+- "Show agent runs" = `SELECT DISTINCT run_id FROM observations WHERE is_run_root = true`
+- "Show all traces with multiple LLM spans" = aggregation over the trace (no write-time cost)
+
+**What was reconsidered:** The original design described four tiers running at ingest, including tier 3 ("trace with >1 LLM span → trace root is run root") and tier 4 ("everything else → run of one"). Both tiers 3 and 4 produce `run_id = trace_id` — the only difference is whether the trace is an agent run, which is a derived flag, not an identifier choice. Streaming pipelines are bad at "look back at sibling spans before deciding what this span is" — doing tier 3 at write time would require holding a per-trace buffer with timeouts. The sharper design is: set `is_run_root` on the spans that explicitly declare themselves as agent roots (tiers 1 and 2), and leave trace-level aggregation to read time. See DECISIONS.md D34.
 
 ### 3.5 Writer (Rust, same binary)
 

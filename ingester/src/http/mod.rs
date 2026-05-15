@@ -8,9 +8,12 @@ use crate::{
     normalizer::Normalizer, pipeline::publisher::Publisher, storage::clickhouse::ClickHouseStore,
 };
 use axum::{
+    extract::State,
+    response::IntoResponse,
     routing::{get, post},
     Router,
 };
+use metrics_exporter_prometheus::PrometheusHandle;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tower_http::{
@@ -26,11 +29,13 @@ use tracing::Level;
 /// `&mut self` for async commands. The mutex is uncontended in normal operation
 /// (each request holds it only for the duration of one XADD call, ~1ms).
 /// `Normalizer` is `Send + Sync` and shared by reference.
+/// `PrometheusHandle` is `Clone` and used by the `/metrics` handler.
 #[derive(Clone)]
 pub struct AppState {
     pub ch: ClickHouseStore,
     pub publisher: Arc<Mutex<Publisher>>,
     pub normalizer: Arc<Normalizer>,
+    pub metrics_handle: PrometheusHandle,
 }
 
 pub fn build_router(state: AppState) -> Router {
@@ -39,8 +44,17 @@ pub fn build_router(state: AppState) -> Router {
         .route("/readyz", get(health::readyz))
         .route("/v1/spans/json", post(spans::post_span))
         .route("/v1/traces", post(otlp::post_otlp_traces))
+        .route("/metrics", get(metrics_handler))
         .layer(request_trace_layer())
         .with_state(state)
+}
+
+/// `GET /metrics` — render the current Prometheus snapshot.
+///
+/// Mounted on the same axum server as the ingest endpoints (single-server
+/// model). See DECISIONS.md D35 for the rationale.
+async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse {
+    state.metrics_handle.render()
 }
 
 /// `TraceLayer` configured to emit one INFO-level JSON record per request

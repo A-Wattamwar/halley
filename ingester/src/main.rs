@@ -21,6 +21,7 @@ mod http;
 mod normalizer;
 mod pipeline;
 mod storage;
+mod telemetry;
 
 use crate::{
     config::Config,
@@ -29,7 +30,9 @@ use crate::{
     normalizer::Normalizer,
     pipeline::{publisher::Publisher, writer::Writer},
     storage::clickhouse::ClickHouseStore,
+    telemetry::init_prometheus,
 };
+use metrics::gauge;
 use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
 use tonic::transport::Server as TonicServer;
 
@@ -52,6 +55,9 @@ async fn main() -> anyhow::Result<()> {
 
     let ch = ClickHouseStore::new(&cfg);
 
+    // Install Prometheus recorder. Must happen before any metrics macros fire.
+    let metrics_handle = init_prometheus();
+
     let publisher = Publisher::new(&cfg.redis_url)
         .await
         .context("connect publisher to Redis")?;
@@ -67,6 +73,34 @@ async fn main() -> anyhow::Result<()> {
     let writer_handle = tokio::spawn(async move {
         writer.run(shutdown_rx).await;
     });
+
+    // Spawn the Redis stream lag poller (every 1s, updates halley_redis_stream_lag gauge).
+    // Runs independently; failure to poll is non-fatal.
+    {
+        let redis_url = cfg.redis_url.clone();
+        tokio::spawn(async move {
+            use redis::AsyncCommands;
+            let client = match redis::Client::open(redis_url.as_str()) {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = %e, "redis lag poller: failed to create client");
+                    return;
+                }
+            };
+            let mut conn = match client.get_multiplexed_async_connection().await {
+                Ok(c) => c,
+                Err(e) => {
+                    tracing::warn!(error = %e, "redis lag poller: failed to connect");
+                    return;
+                }
+            };
+            loop {
+                let lag: i64 = conn.xlen(crate::pipeline::STREAM_KEY).await.unwrap_or(0);
+                gauge!("halley_redis_stream_lag").set(lag as f64);
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+        });
+    }
 
     // --- gRPC server (OTLP :4317) ---
 
@@ -100,6 +134,7 @@ async fn main() -> anyhow::Result<()> {
         ch,
         publisher: Arc::new(Mutex::new(publisher)),
         normalizer: Arc::new(Normalizer::new()),
+        metrics_handle,
     };
     let app = build_router(state);
 

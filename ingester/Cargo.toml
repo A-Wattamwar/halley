@@ -76,6 +76,13 @@ opentelemetry-proto = { version = "0.27", features = ["gen-tonic", "trace", "wit
 # introducing a second tonic version into the dep tree. See DECISIONS.md D33.
 tonic = "0.12"
 
+# ---- Phase 2 (Week 4) dependencies ----
+
+# Prometheus metrics. metrics 0.24 + metrics-exporter-prometheus 0.16 both
+# use edition = "2021" and build cleanly on Rust 1.85. See DECISIONS.md D35.
+metrics = "0.24"
+metrics-exporter-prometheus = "0.16"
+
 [dev-dependencies]
 # Property-based testing for normalizer adapters. See phase-2-week-3.md Day 2.
 proptest = "1"

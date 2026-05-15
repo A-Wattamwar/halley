@@ -19,9 +19,11 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use metrics::histogram;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use serde_json::json;
+use std::time::Instant;
 use tracing::instrument;
 
 /// `POST /v1/traces`
@@ -34,6 +36,7 @@ pub async fn post_otlp_traces(
     headers: HeaderMap,
     body: Bytes,
 ) -> Result<Response, IngestError> {
+    let start = Instant::now();
     let content_type = headers
         .get("content-type")
         .and_then(|v| v.to_str().ok())
@@ -67,6 +70,9 @@ pub async fn post_otlp_traces(
         ingest_otlp_request(request, &state.normalizer, &state.publisher).await;
 
     tracing::info!(accepted, errors, "OTLP/HTTP traces processed");
+
+    histogram!("halley_ingest_latency_seconds", "path" => "http")
+        .record(start.elapsed().as_secs_f64());
 
     Ok((StatusCode::OK, Json(json!({}))).into_response())
 }

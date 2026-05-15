@@ -215,7 +215,22 @@ echo "==> Checking gRPC span landed with source_dialect = otel-genai..."
 grpc_count=$(ch_query "SELECT count() FROM halley.observations WHERE source_dialect = 'otel-genai'" | tr -d '[:space:]')
 assert_ge "gRPC otel-genai row count" "2" "$grpc_count"
 
-# ---- 10. Summary ------------------------------------------------------------
+# ---- 10. Prometheus metrics endpoint (Day 4) --------------------------------
+
+echo "==> Checking /metrics returns Prometheus format..."
+metrics_status=$(curl -s -o /dev/null -w "%{http_code}" "${INGESTER_URL}/metrics")
+assert_eq "metrics HTTP status" "200" "$metrics_status"
+
+metrics_body=$(curl -s "${INGESTER_URL}/metrics")
+if echo "$metrics_body" | grep -q "halley_ingest_requests_total"; then
+    green "  PASS  /metrics contains halley_ingest_requests_total"
+    PASS=$((PASS + 1))
+else
+    red   "  FAIL  /metrics missing halley_ingest_requests_total"
+    FAIL=$((FAIL + 1))
+fi
+
+# ---- 11. Summary ------------------------------------------------------------
 
 echo ""
 echo "==> Smoke test complete: ${PASS} passed, ${FAIL} failed."

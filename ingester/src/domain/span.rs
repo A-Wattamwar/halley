@@ -155,6 +155,13 @@ pub struct ObservationRow {
     pub status: SpanStatus,
     pub error_message: String,
     pub attributes: Vec<(String, String)>, // Map(String,String)
+    /// True if this span is the root of an agent run.
+    /// Set at write time by the normalizer adapters (Week 4 Day 3).
+    /// Corresponds to `is_run_root Bool DEFAULT false` added by migration
+    /// 20260520000001_observations_is_run_root.sql.
+    /// Must be the LAST field — ALTER TABLE ADD COLUMN appends to the end,
+    /// and the clickhouse Row derive serializes fields in declaration order.
+    pub is_run_root: bool,
 }
 
 /// One row in `halley.observation_body`.
@@ -215,8 +222,13 @@ impl TryFrom<RawSpan> for (ObservationRow, Vec<BodyRow>) {
         let tool_output_hash = hash_body(raw.tool_output, project_id, now_us, &mut body_rows);
 
         // --- Attributes: HashMap → sorted Vec<(String,String)> ---
-        let mut attributes: Vec<(String, String)> = raw.attributes.into_iter().collect();
+        // Clone before moving into Vec so we can still read attributes for is_run_root.
+        let mut attributes: Vec<(String, String)> = raw.attributes.clone().into_iter().collect();
         attributes.sort_by(|a, b| a.0.cmp(&b.0));
+
+        // Compute is_run_root before moving raw fields into the struct.
+        let is_run_root = raw.gen_ai_operation == "invoke_agent"
+            || raw.attributes.get("halley.run.kind").map(|s| s.as_str()) == Some("agent");
 
         let obs = ObservationRow {
             trace_id,
@@ -248,6 +260,7 @@ impl TryFrom<RawSpan> for (ObservationRow, Vec<BodyRow>) {
             status: SpanStatus::from_str(&raw.status),
             error_message: raw.error_message,
             attributes,
+            is_run_root,
         };
 
         Ok((obs, body_rows))

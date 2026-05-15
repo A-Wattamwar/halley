@@ -12,10 +12,12 @@ use crate::{
     normalizer::Normalizer,
     pipeline::{ingest::ingest_otlp_request, publisher::Publisher},
 };
+use metrics::histogram;
 use opentelemetry_proto::tonic::collector::trace::v1::{
     trace_service_server::TraceService, ExportTraceServiceRequest, ExportTraceServiceResponse,
 };
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::Mutex;
 use tonic::{Request, Response, Status};
 use tracing::info;
@@ -32,11 +34,15 @@ impl TraceService for HalleyTraceService {
         &self,
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
+        let start = Instant::now();
         let req = request.into_inner();
 
         let (accepted, errors) = ingest_otlp_request(req, &self.normalizer, &self.publisher).await;
 
         info!(accepted, errors, "OTLP/gRPC traces processed");
+
+        histogram!("halley_ingest_latency_seconds", "path" => "grpc")
+            .record(start.elapsed().as_secs_f64());
 
         Ok(Response::new(ExportTraceServiceResponse {
             partial_success: None,

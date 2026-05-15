@@ -13,6 +13,7 @@ use crate::{
     normalizer::{NormalizeError, Normalizer},
     pipeline::publisher::Publisher,
 };
+use metrics::counter;
 use opentelemetry_proto::tonic::{
     collector::trace::v1::ExportTraceServiceRequest,
     common::v1::{any_value::Value as ProtoValue, AnyValue as ProtoAnyValue, KeyValue},
@@ -42,6 +43,11 @@ pub async fn ingest_otlp_request(
                     Ok(()) => accepted += 1,
                     Err(e) => {
                         warn!(error = %e, "OTLP span processing failed");
+                        // Count rejected spans with dialect "unknown" (we don't know
+                        // the dialect if normalization failed before we could read it).
+                        counter!("halley_ingest_requests_total",
+                            "dialect" => "unknown", "status" => "error")
+                        .increment(1);
                         errors += 1;
                     }
                 }
@@ -71,6 +77,10 @@ async fn process_one_span(
         },
     })?;
 
+    // Emit metrics after successful normalization.
+    let dialect = canonical.source_dialect.clone();
+    let unknown_attr_count = canonical.attributes.len() as u64;
+
     let (obs_row, body_rows) = canonical.into_rows()?;
 
     publisher
@@ -79,6 +89,15 @@ async fn process_one_span(
         .publish(&obs_row, &body_rows)
         .await
         .map_err(|e| IngestError::Storage(format!("publish error: {e}")))?;
+
+    // Count accepted span.
+    counter!("halley_ingest_requests_total", "dialect" => dialect.clone(), "status" => "ok")
+        .increment(1);
+    // Count unknown attributes preserved (one increment per attribute per span).
+    if unknown_attr_count > 0 {
+        counter!("halley_normalizer_unknown_attributes_total", "dialect" => dialect)
+            .increment(unknown_attr_count);
+    }
 
     Ok(())
 }

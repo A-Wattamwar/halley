@@ -13,23 +13,34 @@
 //!    must be checked before the generic OTEL GenAI adapter to avoid the
 //!    generic adapter claiming OpenLLMetry spans.
 //!
-//! 3. **otel-genai**: detected by presence of `gen_ai.system` or
-//!    `gen_ai.provider.name` attribute. Fallback for any GenAI span that is
-//!    not OpenLLMetry.
+//! 3. **openinference**: detected by presence of `openinference.span.kind` OR
+//!    `llm.model_name`. Must come before otel-genai because OpenInference spans
+//!    may also carry `gen_ai.*` attributes in mixed instrumentations.
 //!
-//! 4. **fallback**: no adapter matched → `NormalizeError::UnknownDialect`.
+//! 4. **vercel-ai**: detected by presence of `ai.operationId`, `ai.model.id`,
+//!    or `ai.model.provider`. Must come before otel-genai because Vercel AI SDK
+//!    v6 also emits `gen_ai.*` attributes on inner doGenerate/doStream spans.
+//!
+//! 5. **otel-genai**: detected by presence of `gen_ai.system` or
+//!    `gen_ai.provider.name` attribute. Fallback for any GenAI span that is
+//!    not claimed by a more specific adapter.
+//!
+//! 6. **fallback**: no adapter matched → `NormalizeError::UnknownDialect`.
 //!    The span is not dropped; the caller decides what to do (log, DLQ, etc.).
 //!
 //! This priority is documented here and in DECISIONS.md D31.
 
 pub mod halley_raw;
+pub mod openinference;
 pub mod openllmetry;
 pub mod otel_genai;
+pub mod vercel_ai;
 
 use crate::{
     domain::{canonical::CanonicalSpan, otlp_span::OtlpSpan},
     normalizer::{
-        halley_raw::HalleyRawAdapter, openllmetry::OpenLLMetryAdapter, otel_genai::OtelGenAiAdapter,
+        halley_raw::HalleyRawAdapter, openinference::OpenInferenceAdapter,
+        openllmetry::OpenLLMetryAdapter, otel_genai::OtelGenAiAdapter, vercel_ai::VercelAiAdapter,
     },
 };
 use thiserror::Error;
@@ -69,13 +80,15 @@ pub struct Normalizer {
 impl Normalizer {
     /// Build the normalizer with all adapters registered in detection priority order.
     ///
-    /// Priority: halley-raw → openllmetry → otel-genai
+    /// Priority: halley-raw → openllmetry → openinference → vercel-ai → otel-genai
     /// See module-level doc comment and DECISIONS.md D31.
     pub fn new() -> Self {
         Self {
             adapters: vec![
                 Box::new(HalleyRawAdapter),
                 Box::new(OpenLLMetryAdapter), // more specific than otel-genai; must come first
+                Box::new(OpenInferenceAdapter), // before otel-genai; may carry gen_ai.* too
+                Box::new(VercelAiAdapter),    // before otel-genai; v6 emits gen_ai.* too
                 Box::new(OtelGenAiAdapter),
             ],
         }
