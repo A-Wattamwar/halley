@@ -149,7 +149,73 @@ echo "==> Checking dashboard is reachable at http://localhost:3000..."
 dash_status=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3000)
 assert_eq "dashboard HTTP status" "200" "$dash_status"
 
-# ---- 7. Summary -------------------------------------------------------------
+# ---- 7. OTLP/HTTP protobuf ingest (Day 3) -----------------------------------
+
+OTLP_BIN="$(dirname "$0")/../fixtures/otlp-genai-trace.bin"
+
+echo "==> POST otlp-genai-trace.bin to /v1/traces (OTLP/HTTP protobuf)..."
+otlp_response=$(curl -s -w '\n%{http_code}' -X POST "${INGESTER_URL}/v1/traces" \
+    -H 'Content-Type: application/x-protobuf' \
+    --data-binary @"${OTLP_BIN}")
+otlp_status=$(echo "$otlp_response" | tail -1)
+otlp_body=$(echo "$otlp_response" | head -1)
+
+assert_eq "OTLP/HTTP POST status" "200" "$otlp_status"
+assert_eq "OTLP/HTTP POST body" '{}' "$otlp_body"
+
+sleep 1
+
+echo "==> Checking OTLP span landed with source_dialect = otel-genai..."
+otel_dialect=$(ch_query "SELECT source_dialect FROM halley.observations WHERE source_dialect = 'otel-genai' LIMIT 1" | tr -d '[:space:]')
+assert_eq "OTLP span source_dialect" "otel-genai" "$otel_dialect"
+
+# ---- 8. OpenLLMetry OTLP ingest (Day 4) ------------------------------------
+
+OPENLLMETRY_BIN="$(dirname "$0")/../fixtures/otlp-openllmetry-trace.bin"
+
+echo "==> POST otlp-openllmetry-trace.bin to /v1/traces (OpenLLMetry dialect)..."
+ollm_response=$(curl -s -w '\n%{http_code}' -X POST "${INGESTER_URL}/v1/traces" \
+    -H 'Content-Type: application/x-protobuf' \
+    --data-binary @"${OPENLLMETRY_BIN}")
+ollm_status=$(echo "$ollm_response" | tail -1)
+ollm_body=$(echo "$ollm_response" | head -1)
+
+assert_eq "OpenLLMetry POST status" "200" "$ollm_status"
+assert_eq "OpenLLMetry POST body" '{}' "$ollm_body"
+
+sleep 1
+
+echo "==> Checking OpenLLMetry span landed with source_dialect = openllmetry and run_name = test-run..."
+ollm_row=$(ch_query "SELECT source_dialect, run_name FROM halley.observations WHERE source_dialect = 'openllmetry' LIMIT 1")
+ollm_dialect=$(echo "$ollm_row" | awk '{print $1}')
+ollm_run_name=$(echo "$ollm_row" | awk '{print $2}')
+assert_eq "OpenLLMetry source_dialect" "openllmetry" "$ollm_dialect"
+assert_eq "OpenLLMetry run_name" "test-run" "$ollm_run_name"
+
+# ---- 9. OTLP/gRPC ingest (Day 5) -------------------------------------------
+
+echo "==> Running gRPC smoke client (cargo run --bin smoke-grpc)..."
+# Build and run the gRPC smoke client. It connects to localhost:4317,
+# sends the OTEL GenAI fixture, and exits 0 on success.
+if cargo run --bin smoke-grpc --manifest-path "$(dirname "$0")/../Cargo.toml" --quiet 2>/dev/null; then
+    green "  PASS  gRPC smoke client exited 0"
+    PASS=$((PASS + 1))
+else
+    red   "  FAIL  gRPC smoke client exited non-zero"
+    FAIL=$((FAIL + 1))
+fi
+
+sleep 1
+
+echo "==> Checking gRPC span landed with source_dialect = otel-genai..."
+# The gRPC fixture uses the same trace_id as the HTTP fixture (0102030405060708090a0b0c0d0e0f10).
+# We check that at least one otel-genai row exists (the HTTP test already inserted one;
+# the gRPC test adds another with the same trace_id but the writer deduplicates body hashes,
+# not observation rows — so count should be >= 2 after both Day 3 and Day 5 assertions).
+grpc_count=$(ch_query "SELECT count() FROM halley.observations WHERE source_dialect = 'otel-genai'" | tr -d '[:space:]')
+assert_ge "gRPC otel-genai row count" "2" "$grpc_count"
+
+# ---- 10. Summary ------------------------------------------------------------
 
 echo ""
 echo "==> Smoke test complete: ${PASS} passed, ${FAIL} failed."

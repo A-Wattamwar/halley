@@ -412,3 +412,34 @@ Work:
 ## When to stop
 
 Week 3 is done when every checkbox above passes. If it finishes early, do not start Week 4. Use the time to deepen the property tests, polish docstrings, or re-run the smoke test under load (`for i in $(seq 1 1000); do curl ...; done`) to find races. Write the Week 3 retro at the bottom of this file.
+
+---
+
+## Week 3 retro
+
+### What shipped
+
+Week 3 delivered the full pipeline refactor and all three OTLP receivers on schedule. The ingester now runs three concurrent tokio tasks: an axum HTTP server (`:4318`), a tonic gRPC server (`:4317`), and a Redis Streams writer. The data path is `receiver → OtlpSpan → Normalizer → CanonicalSpan → (ObservationRow, Vec<BodyRow>) → XADD halley:spans → XREADGROUP → ClickHouse`. Three normalizer adapters shipped: `halley-raw` (near-identity, the `/v1/spans/json` path), `otel-genai` (OTEL GenAI semconv, events-first body extraction with attribute fallback), and `openllmetry` (traceloop.* detection, span-kind mapping, entity-name → run_name). Property tests cover round-trip identity and unknown-attribute preservation for all three adapters. The smoke test grew from 9 to 18 assertions across the week. The writer's retry policy was corrected mid-Day-1 to classify transient (network) errors as retry-forever-with-capped-backoff rather than DLQ after 3 attempts — the original policy would have defeated the entire purpose of the Redis buffer during ClickHouse outages.
+
+### What slipped
+
+Nothing from the Week 3 scope slipped. The reviewer checklist in the plan is fully satisfied: pipeline publisher/writer exist, HTTP handler does not call ClickHouse directly, OTLP/HTTP accepts both protobuf and JSON, gRPC accepts TraceServiceServer.Export calls, the same logical span via HTTP and gRPC produces identical canonical rows, all three adapters have property tests, and the smoke test is at 12 wire-check assertions (the plan said 12; we ended at 18 because each assert_eq call counts individually in the shell script). The out-of-scope items (OpenInference, Vercel AI SDK, is_run_root, Prometheus metrics, DLQ consumer, load test, compatibility matrix) were not touched.
+
+### What surprised
+
+**1. Retry policy design flaw caught in live testing (Day 1).** The initial writer used a fixed 3-retry loop for all errors. The live backpressure test (stop ClickHouse, post 100 spans, restart ClickHouse) revealed that 3 retries × 200/400/800ms = 1.4 seconds total, far shorter than ClickHouse's 5–15s restart time. Every span posted during the outage ended up in the DLQ. The fix required classifying errors as transient (network/connection — retry forever with capped backoff, no XACK) vs permanent (schema/decode — DLQ after MAX_RETRIES). This is the right mental model for any Redis Streams pipeline and should have been in the original design. D30 documents it.
+
+**2. Stale Docker image on first Day 1 approval attempt.** `make smoke` passed against the old direct-insert binary because `docker compose up -d` reused the cached image. The smoke test was asserting ClickHouse rows that arrived via the old path, not the new Redis path. The fix was `docker compose build --no-cache ingester` before every acceptance run. Added to the mental checklist for all future days.
+
+**3. tonic version inheritance from opentelemetry-proto (Day 5).** The plan referenced "tonic 0.13" (which does not exist on crates.io; the series went 0.12 → 0.14). `opentelemetry-proto 0.27` already pulls in `tonic v0.12.3` transitively. Using `tonic = "0.12"` explicitly matched the existing dep tree with zero MSRV impact. The 0.14.x bump is deferred until a feature demands it (D33).
+
+**4. Dockerfile stub bin issue (Day 5).** Adding the `[[bin]] smoke-grpc` target to `Cargo.toml` broke the Dockerfile's dependency pre-compilation layer. The layer creates a stub `src/main.rs` and runs `cargo build --release` to cache deps; it did not create `src/bin/smoke_grpc.rs`, so the build failed with "file not found". Fix: add `mkdir -p src/bin && echo 'fn main() {}' > src/bin/smoke_grpc.rs` to the stub step. Lesson: every `[[bin]]` target needs a corresponding stub in the Dockerfile dep-cache layer.
+
+**5. Disk space corruption (twice).** The macOS host ran out of disk space during Docker builds on two separate occasions, corrupting the Docker daemon's metadata DB. The second time required a full Docker Desktop restart and 20GB of manual cleanup. Not a code issue, but it cost ~45 minutes total. The `cargo clean` habit (removing 2.5GB of build artifacts) is now part of the pre-build checklist.
+
+### What the reviewer should look at first
+
+1. **`pipeline/writer.rs` retry loop** — the `is_transient_error()` classification and the `tokio::select!` shutdown interruptibility. This is the most operationally critical code in Week 3 and the one that was wrong on the first attempt.
+2. **`normalizer/mod.rs` adapter Vec order** — halley-raw → openllmetry → otel-genai. The order is the contract; swapping openllmetry and otel-genai would silently misclassify all OpenLLMetry traffic.
+3. **`pipeline/ingest.rs`** — the shared `ingest_otlp_request()` function. Both HTTP and gRPC receivers call this; any bug here affects both paths simultaneously.
+4. **`domain/canonical.rs` `into_rows()`** — `run_id = trace_id` always at this stage. The `is_run_root` column is Week 4 Day 3; confirm it is not present in the schema yet.

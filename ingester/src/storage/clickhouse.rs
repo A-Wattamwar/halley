@@ -79,6 +79,8 @@ impl ClickHouseStore {
     ///
     /// Week 1 uses single-row inserts; Week 3 introduces batching via
     /// Redis Streams. See ARCHITECTURE §3.5.
+    /// Kept for test helpers and future use.
+    #[allow(dead_code)]
     pub async fn insert_observation(&self, row: ObservationRow) -> Result<(), IngestError> {
         let mut insert = self
             .client
@@ -92,6 +94,36 @@ impl ClickHouseStore {
             .end()
             .await
             .map_err(|e| IngestError::Storage(format!("insert_observation end: {e}")))?;
+        Ok(())
+    }
+
+    /// Batch-insert body rows. Used by the writer task (Phase 2).
+    /// Identical to `insert_bodies` but named distinctly for clarity at call sites.
+    pub async fn insert_bodies_batch(&self, rows: Vec<BodyRow>) -> Result<(), IngestError> {
+        self.insert_bodies(rows).await
+    }
+
+    /// Batch-insert observation rows. Used by the writer task (Phase 2).
+    pub async fn insert_observations_batch(
+        &self,
+        rows: Vec<ObservationRow>,
+    ) -> Result<(), IngestError> {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let mut insert = self
+            .client
+            .insert("observations")
+            .map_err(|e| IngestError::Storage(format!("insert_observations_batch prepare: {e}")))?;
+        for row in rows {
+            insert.write(&row).await.map_err(|e| {
+                IngestError::Storage(format!("insert_observations_batch write: {e}"))
+            })?;
+        }
+        insert
+            .end()
+            .await
+            .map_err(|e| IngestError::Storage(format!("insert_observations_batch end: {e}")))?;
         Ok(())
     }
 }
