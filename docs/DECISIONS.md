@@ -360,3 +360,222 @@ environment variable is set to `0.0.0.0` (which is needed to bind the
 Next.js server to all interfaces). Using the literal loopback address
 bypasses the hostname resolution issue. The server itself binds correctly
 to `0.0.0.0:3000` and is reachable from the host at `localhost:3000`.
+
+---
+
+## 2026-05-15 — Phase 2 Day 1 (Week 3)
+
+### D26. Redis stream entry encoding: bincode over postcard
+Each entry published to `halley:spans` encodes a `(ObservationRow, Vec<BodyRow>)`
+tuple — the already-normalized, already-hashed pair produced by the receiver
+after the full pipeline: `OtlpSpan → CanonicalSpan → (ObservationRow, Vec<BodyRow>)`.
+The writer deserializes this tuple, deduplicates body hashes within the batch,
+and inserts to ClickHouse.
+
+Encoding choice: **bincode** (v1.x, `bincode = "1"`).
+
+Reasons:
+- More widely used than postcard; more community familiarity.
+- Slightly larger payloads than postcard but negligible at our scale (a single
+  span entry is ~1-2 KB; Redis stream overhead dominates).
+- `serde`-based, so the same `#[derive(Serialize, Deserialize)]` annotations
+  already on `ObservationRow` and `BodyRow` work without changes.
+- No `#[no_std]` requirement; postcard's main advantage is embedded targets,
+  which we do not have.
+
+Re-evaluate in Week 4 if Redis bandwidth becomes a load-test bottleneck.
+At that point, postcard would save ~20-30% payload size. The switch would
+be a one-line dep change plus a version bump in the stream key name to
+avoid mixed-encoding entries during a rolling restart.
+
+### D27. Normalizer adapter detection priority
+**SUPERSEDED by D31** (Phase 2 Day 2). D31 contains the complete and current
+adapter registration order including the OpenLLMetry adapter added on Day 4.
+The original D27 text is preserved below for history.
+
+The `Normalizer::normalize()` method tries adapters in this order:
+
+1. **halley-raw**: detect by `source_dialect = "halley-raw"` attribute on the
+   `OtlpSpan`. This is an explicit opt-in from the `/v1/spans/json` receiver
+   and must be checked first to avoid misclassification.
+2. **openllmetry**: detect by presence of any `traceloop.*` attribute key.
+   OpenLLMetry is more specific than OTEL GenAI (it always adds `traceloop.*`
+   keys on top of `gen_ai.*`), so it must be checked before the generic
+   OTEL GenAI adapter to avoid the generic adapter claiming OpenLLMetry spans.
+3. **otel-genai**: detect by presence of `gen_ai.system` or `gen_ai.provider.name`
+   attribute. This is the fallback for any span that looks like a GenAI span
+   but is not OpenLLMetry.
+4. **fallback**: if no adapter matches, return a `NormalizeError::UnknownDialect`
+   and emit a metrics event. The span is NOT dropped — the raw OTLP payload
+   is preserved in the DLQ stream for later reprocessing (Week 4).
+
+This priority is documented in a code comment above `Normalizer::normalize()`
+in `normalizer/mod.rs`.
+
+### D28. Rust toolchain bump: 1.83 → 1.85
+Bumped `rust-toolchain.toml` and `Cargo.toml` `rust-version` from 1.83 to 1.85.
+
+Reason: `tonic 0.14.x` (the current stable series, required for OTLP/gRPC on
+Week 3 Day 5) uses `edition = "2024"`. Rust edition 2024 was stabilized in
+Rust 1.85.0 (released 2025-02-20). Any crate using `edition = "2024"` implicitly
+requires Rust ≥ 1.85 as its MSRV. The plan's reference to "tonic 0.13" was
+stale — that version does not exist on crates.io; the series went 0.12 → 0.14.
+
+`opentelemetry-proto` with the `gen-tonic` feature transitively requires tonic
+0.14, so it also requires 1.85.
+
+`prost 0.13.x` stays on `edition = "2021"` and is fine on 1.85.
+`redis 0.27.x` stays on `edition = "2021"` and is fine on 1.85.
+`proptest` and `metrics-exporter-prometheus` are fine on 1.85.
+
+### D29. ICU pin re-evaluation after 1.85 bump
+After bumping to 1.85, `cargo update` walked the ICU family forward to 2.2.0,
+which requires Rust 1.86. The same D21 pattern repeats one version later.
+
+Pinned back to the last 1.85-compatible versions:
+
+| crate                | pinned | latest (requires 1.86) |
+|----------------------|--------|------------------------|
+| `idna_adapter`       | 1.2.1  | 1.2.2                  |
+| `icu_collections`    | 2.0.0  | 2.2.0                  |
+| `icu_locale_core`    | 2.0.1  | 2.2.0                  |
+| `icu_normalizer`     | 2.0.1  | 2.2.0                  |
+| `icu_normalizer_data`| 2.0.0  | 2.2.0                  |
+| `icu_properties`     | 2.0.2  | 2.2.0                  |
+| `icu_properties_data`| 2.0.1  | 2.2.0                  |
+| `icu_provider`       | 2.0.0  | 2.2.0                  |
+| `uuid`               | 1.23.1 | (no MSRV issue, walked forward fine) |
+
+`uuid` walked forward to 1.23.1 cleanly — no pin needed.
+
+The ICU 2.2.0 crates are a coordinated release; they all require each other at
+2.2.0. Pinning `icu_normalizer` to 2.0.1 pulls the whole family back.
+The root of the chain is `idna_adapter`, which must also be pinned to 1.2.1.
+
+When we eventually bump to Rust 1.86 (no known trigger yet), `cargo update`
+will walk all of these forward. Until then, `cargo update` on 1.85 will
+respect the MSRV-aware resolver and not re-introduce the break.
+
+### D30. Writer retry classification: transient vs permanent errors
+The original writer used a fixed MAX_RETRIES (3) loop for all insert failures.
+This was wrong: with 3 retries at 200/400/800ms backoff, the writer DLQ'd
+every span within ~1.4 seconds. ClickHouse takes 5-15s to restart. Result:
+every span posted during a ClickHouse outage ended up permanently in the DLQ,
+defeating the entire purpose of the Redis Streams buffer.
+
+**Correct mental model:**
+- The Redis buffer exists to absorb infrastructure outages. The writer should
+  hold spans in the PEL (Pending Entry List) until ClickHouse recovers.
+- DLQ is for un-fixable data: bincode decode failures, schema errors. These
+  will never succeed no matter how long we wait.
+
+**Classification logic** (in `pipeline/writer.rs::is_transient_error()`):
+- TRANSIENT: error string contains "network", "connect", "connection refused",
+  "dns", "timeout", "broken pipe", "reset by peer", "eof", "os error", "tcp",
+  "io error". These are infrastructure failures.
+  → Retry forever with exponential backoff capped at 30s (200ms, 400ms, 800ms,
+    1.6s, 3.2s, 6.4s, 12.8s, 25.6s, 30s, 30s, ...).
+  → Do NOT XACK. Entries stay in the PEL so they survive a writer restart.
+  → Do NOT increment a "retries remaining" counter.
+- PERMANENT: anything else (schema mismatch, bad data, etc.).
+  → MAX_RETRIES (3) attempts with short backoff, then DLQ + XACK.
+
+**Shutdown interruptibility:**
+The backoff sleep uses `tokio::select!` so a shutdown signal during a long
+transient backoff does not hang the process. On shutdown during transient
+retry, the batch is left in the PEL — the next writer instance will pick it
+up via XAUTOCLAIM or on reconnect.
+
+**Backoff formula:** `min(200ms * 2^attempt, 30_000ms)` where `attempt` is
+only incremented for permanent errors. Transient retries always use the same
+formula but with a counter that resets on each new batch.
+
+---
+
+## 2026-05-15 — Phase 2 Day 2 (Week 3)
+
+### D31. Hand-rolled OtlpSpan intermediate type (not prost-generated)
+The normalizer trait takes a hand-rolled `OtlpSpan` struct as input rather than
+the prost-generated `opentelemetry_proto::tonic::trace::v1::Span`.
+
+Reasons:
+- Decouples the normalizer from the protobuf crate. All three receiver layers
+  (HTTP JSON, OTLP HTTP protobuf, OTLP gRPC) produce the same `OtlpSpan` before
+  handing off to the normalizer. The normalizer has no protobuf dependency.
+- Property tests can generate arbitrary `OtlpSpan` values with proptest without
+  constructing prost types (which require careful field initialization).
+- The `AnyValue` enum mirrors OTLP's `oneof value` exactly where we need it
+  (String, Bool, Int, Double, Bytes, Array, Kvlist) without the prost wrapper.
+
+The `OtlpSpan` struct lives in `domain/otlp_span.rs`. The OTLP HTTP and gRPC
+receivers (Days 3 and 5) will convert prost-generated types into `OtlpSpan`
+at the receiver boundary, keeping the conversion logic isolated.
+
+Adapter detection priority (also documented in `normalizer/mod.rs`):
+1. **halley-raw**: `source_dialect = "halley-raw"` attribute. Explicit opt-in
+   from `/v1/spans/json`; must be first to avoid misclassification.
+2. **openllmetry** (Day 4): any `traceloop.*` attribute key. More specific than
+   OTEL GenAI; must precede it.
+3. **otel-genai**: `gen_ai.system` or `gen_ai.provider.name` attribute. Fallback
+   for any GenAI span not claimed by a more specific adapter.
+4. **fallback**: `NormalizeError::UnknownDialect`. Span is not dropped.
+
+**Updated Day 4**: OpenLLMetry adapter (`normalizer/openllmetry.rs`) is now
+registered in the `Normalizer::new()` adapter Vec between halley-raw and
+otel-genai. A span carrying both `gen_ai.system` and any `traceloop.*` key
+is detected as "openllmetry" (not "otel-genai") because openllmetry has
+higher priority. Verified by `detection_priority_openllmetry_beats_otel_genai`
+unit test in `normalizer/openllmetry.rs`.
+
+---
+
+## 2026-05-15 — Phase 2 Day 3 (Week 3)
+
+### D32. OTLP fixture generation: test helper in tests/gen_otlp_fixture.rs
+The files `ingester/fixtures/otlp-genai-trace.bin` and
+`ingester/fixtures/otlp-openllmetry-trace.bin` are deterministic
+protobuf-encoded `ExportTraceServiceRequest` payloads used by the smoke test.
+
+**How they were generated:**
+Run `cargo test --test gen_otlp_fixture -- --nocapture` from `ingester/`.
+The file contains two test functions:
+- `generate_otlp_genai_fixture()` → `fixtures/otlp-genai-trace.bin` (349 bytes)
+- `generate_otlp_openllmetry_fixture()` → `fixtures/otlp-openllmetry-trace.bin` (463 bytes)
+
+Both use fixed trace_id, span_id, and timestamps for determinism.
+Re-run the test to regenerate if the OTLP protobuf schema changes.
+
+---
+
+## 2026-05-15 — Phase 2 Day 5 (Week 3)
+
+### D33. tonic pinned to 0.12.x; 0.14.x bump deferred
+`opentelemetry-proto 0.27` already pulls in `tonic v0.12.3` transitively
+(confirmed via `cargo tree | grep tonic`). Adding `tonic = "0.12"` explicitly
+to `Cargo.toml` uses the same version already in the dep tree — no second
+tonic version, no MSRV concern.
+
+The original Phase 2 plan referenced "tonic 0.13" (which does not exist on
+crates.io; the series went 0.12 → 0.14). Bumping to 0.14.x would require
+Rust 1.85+ (edition 2024) and would introduce a second tonic version alongside
+the 0.12.3 already pulled by opentelemetry-proto. Deferred until a feature
+demands it (e.g., tonic interceptors, TLS, or a new opentelemetry-proto release
+that bumps its own tonic dep).
+
+**No `build.rs` needed**: the `gen-tonic` feature on `opentelemetry-proto`
+ships pre-generated tonic code for `TraceServiceServer` and `TraceServiceClient`.
+The `TraceService` trait is at:
+`opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceService`
+
+**gRPC smoke client**: implemented as a `[[bin]]` target (`src/bin/smoke_grpc.rs`)
+rather than a `[[test]]` target. Reasons:
+- `[[test]]` targets run in the test harness and cannot easily be invoked from
+  a shell script with a simple exit code.
+- `[[bin]]` targets compile to a standalone binary that `cargo run --bin smoke-grpc`
+  can invoke from `smoke.sh` with a clean exit code contract.
+- The binary is not shipped in the Docker image (it is a dev-only tool).
+
+**Shared ingest logic**: `pipeline/ingest.rs` contains `ingest_otlp_request()`
+which is called by both `http/otlp.rs` and `grpc/otlp.rs`. This avoids
+duplicating the ResourceSpans → ScopeSpans → Span iteration loop and ensures
+both receivers produce identical canonical rows for equivalent payloads.

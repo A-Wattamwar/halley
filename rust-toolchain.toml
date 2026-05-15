@@ -3,6 +3,10 @@
 # Compatibility over shiny: we would rather catch MSRV surprises early
 # than chase the latest release train. Bump only if a dep demands it
 # and log the bump in docs/DECISIONS.md.
-channel = "1.83"
+#
+# Bumped from 1.83 → 1.85 on Phase 2 Day 1 (2026-05-15).
+# Reason: tonic 0.14.x (required for OTLP/gRPC in Week 3 Day 5) uses
+# edition = "2024", which was stabilized in Rust 1.85.0. See DECISIONS.md D28.
+channel = "1.85"
 components = ["rustfmt", "clippy"]
 profile = "minimal"

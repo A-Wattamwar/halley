@@ -122,7 +122,8 @@ services:
     restart: unless-stopped
     env_file: .env
     ports:
-      - "4318:4318"
+      - "4318:4318"  # OTLP/HTTP
+      - "4317:4317"  # OTLP/gRPC
     depends_on:
       clickhouse:
         condition: service_healthy

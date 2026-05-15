@@ -1,7 +1,9 @@
 # Halley ingester — multi-stage Dockerfile.
 #
-# Stage 1 (builder): compile the release binary on rust:1.83-slim.
-#   Toolchain matches rust-toolchain.toml (channel = "1.83").
+# Stage 1 (builder): compile the release binary on rust:1.85-slim.
+#   Toolchain matches rust-toolchain.toml (channel = "1.85").
+#   Bumped from 1.83 to 1.85 in Phase 2 Day 1 (DECISIONS.md D28: tonic 0.14
+#   requires edition = "2024" which needs Rust 1.85+).
 #   We copy Cargo.toml + Cargo.lock first so dependency layers are cached
 #   independently of source changes.
 #
@@ -11,7 +13,7 @@
 #   The binary runs as a non-root user (uid 10001).
 
 # ---- Stage 1: build --------------------------------------------------------
-FROM rust:1.83-slim AS builder
+FROM rust:1.85-slim AS builder
 
 WORKDIR /build
 
@@ -21,9 +23,11 @@ COPY Cargo.toml Cargo.lock ./
 
 # Create a stub main so `cargo build --release` can compile deps without
 # the real source. The stub is overwritten in the next COPY step.
-RUN mkdir -p src && echo 'fn main() {}' > src/main.rs \
+RUN mkdir -p src/bin \
+    && echo 'fn main() {}' > src/main.rs \
+    && echo 'fn main() {}' > src/bin/smoke_grpc.rs \
     && cargo build --release \
-    && rm -f target/release/deps/halley_ingester*
+    && rm -f target/release/deps/halley_ingester* target/release/deps/smoke_grpc*
 
 # Now copy the real source and build the final binary.
 COPY src ./src
@@ -51,5 +55,6 @@ RUN chmod +x /app/halley-ingester
 USER halley
 
 EXPOSE 4318
+EXPOSE 4317
 
 CMD ["/app/halley-ingester"]

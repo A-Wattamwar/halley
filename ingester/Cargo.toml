@@ -2,7 +2,7 @@
 name = "halley-ingester"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.83"
+rust-version = "1.85"
 license = "MIT"
 publish = false
 description = "Halley ingester: OTLP receiver and ClickHouse writer (Week 1 skeleton)"
@@ -10,6 +10,13 @@ description = "Halley ingester: OTLP receiver and ClickHouse writer (Week 1 skel
 [[bin]]
 name = "halley-ingester"
 path = "src/main.rs"
+
+# gRPC smoke test client — used by ingester/tests/smoke.sh Day 5 assertion.
+# Connects to localhost:4317, sends the OTEL GenAI fixture, asserts success.
+# See DECISIONS.md D33.
+[[bin]]
+name = "smoke-grpc"
+path = "src/bin/smoke_grpc.rs"
 
 [dependencies]
 # HTTP server and async runtime.
@@ -48,5 +55,27 @@ uuid = { version = "1", features = ["serde"] }
 # Timestamps for test fixtures and log records.
 chrono = { version = "0.4", features = ["serde"] }
 
-# ---- Non-goals (Week 1): do NOT add tonic, prost, opentelemetry-proto. ----
-# Those belong in Week 3 (Phase 2). Keep this tree lean.
+# ---- Phase 2 (Week 3) dependencies ----
+
+# Redis Streams pipeline. Only the features we need: async tokio driver + streams.
+# 0.27.6 is the latest stable; uses edition = "2021", fine on Rust 1.85.
+# See DECISIONS.md D26 for stream entry encoding rationale.
+redis = { version = "0.27", features = ["tokio-comp", "streams"] }
+
+# Stream entry encoding: bincode v1 over postcard. See DECISIONS.md D26.
+bincode = "1"
+
+# OTLP protobuf decoding (Day 3). prost 0.13 uses edition = "2021", fine on 1.85.
+# opentelemetry-proto 0.27 with gen-tonic + trace gives us the pre-generated
+# ExportTraceServiceRequest and related types. See DECISIONS.md D32.
+prost = "0.13"
+opentelemetry-proto = { version = "0.27", features = ["gen-tonic", "trace", "with-serde"] }
+
+# tonic 0.12.x — matches the version opentelemetry-proto 0.27 already pulls in
+# transitively (confirmed via `cargo tree | grep tonic`). Using 0.12 avoids
+# introducing a second tonic version into the dep tree. See DECISIONS.md D33.
+tonic = "0.12"
+
+[dev-dependencies]
+# Property-based testing for normalizer adapters. See phase-2-week-3.md Day 2.
+proptest = "1"

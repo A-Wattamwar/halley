@@ -85,7 +85,7 @@ pub struct RawSpan {
 /// Enum8('ok'=1,'error'=2,'timeout'=3) in ClickHouse.
 /// `serde_repr` serializes as the numeric discriminant, which is what
 /// ClickHouse's RowBinary format expects for Enum8 columns.
-#[derive(Debug, Serialize_repr)]
+#[derive(Debug, Clone, Serialize_repr, serde_repr::Deserialize_repr)]
 #[repr(u8)]
 pub enum SpanStatus {
     Ok = 1,
@@ -113,7 +113,7 @@ impl SpanStatus {
 /// - `DateTime64(9)`   → `u64` nanoseconds since epoch
 /// - `Enum8`           → `SpanStatus` with `serde_repr` (numeric discriminant)
 /// - `Map(String,String)` → `Vec<(String,String)>`
-#[derive(Debug, Row, Serialize)]
+#[derive(Debug, Clone, Row, Serialize, Deserialize)]
 pub struct ObservationRow {
     pub trace_id: [u8; 16],
     pub span_id: [u8; 8],
@@ -162,7 +162,7 @@ pub struct ObservationRow {
 /// - `FixedString(32)` → `[u8; 32]`
 /// - `UUID`            → `uuid::Uuid` with `clickhouse::serde::uuid`
 /// - `DateTime64(6)`   → `u64` microseconds since epoch
-#[derive(Debug, Row, Serialize)]
+#[derive(Debug, Clone, Row, Serialize, Deserialize)]
 pub struct BodyRow {
     pub body_hash: [u8; 32],
     pub body: String,
@@ -276,6 +276,16 @@ fn decode_hex_id<const N: usize>(s: &str, field: &'static str) -> Result<[u8; N]
     let mut arr = [0u8; N];
     arr.copy_from_slice(&bytes);
     Ok(arr)
+}
+
+/// Public re-export of `decode_hex_id` for use by the normalizer layer.
+/// The normalizer needs to decode hex IDs from `RawSpan` when converting
+/// to `OtlpSpan`. See `normalizer/halley_raw.rs::raw_span_to_otlp`.
+pub fn decode_hex_id_pub<const N: usize>(
+    s: &str,
+    field: &'static str,
+) -> Result<[u8; N], IngestError> {
+    decode_hex_id::<N>(s, field)
 }
 
 /// Canonicalize a `serde_json::Value`, SHA-256 hash it, push a `BodyRow`,

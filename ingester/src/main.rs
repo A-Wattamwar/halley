@@ -1,28 +1,37 @@
 //! Halley ingester entry point.
 //!
-//! Responsibilities at Day 3:
-//!   - Load config from env.
-//!   - Initialize tracing (JSON if `INGESTER_LOG_JSON=true`).
-//!   - Build the axum router with ClickHouseStore in AppState.
-//!   - Serve HTTP with graceful shutdown on SIGINT/SIGTERM.
+//! Phase 2 Day 5: three tokio tasks in one process.
+//!   1. axum HTTP server (OTLP/HTTP :4318 + /v1/spans/json)
+//!   2. tonic gRPC server (OTLP/gRPC :4317)
+//!   3. Writer (Redis consumer → ClickHouse batch inserter)
 //!
-//! Day 6 adds the span insert path; this bootstrap does not change.
+//! See ARCHITECTURE §3.2, §3.5 and phase-2-overview.md for the data-flow.
 
 use anyhow::Context;
+use std::sync::Arc;
+use tokio::sync::{watch, Mutex};
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 mod config;
 mod domain;
 mod errors;
+mod grpc;
 mod http;
+mod normalizer;
+mod pipeline;
 mod storage;
 
 use crate::{
     config::Config,
+    grpc::otlp::HalleyTraceService,
     http::{build_router, AppState},
+    normalizer::Normalizer,
+    pipeline::{publisher::Publisher, writer::Writer},
     storage::clickhouse::ClickHouseStore,
 };
+use opentelemetry_proto::tonic::collector::trace::v1::trace_service_server::TraceServiceServer;
+use tonic::transport::Server as TonicServer;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -31,14 +40,68 @@ async fn main() -> anyhow::Result<()> {
     init_tracing(&cfg);
 
     info!(
-        addr = %cfg.http_addr,
+        http_addr = %cfg.http_addr,
+        grpc_addr = %cfg.grpc_addr,
         clickhouse_url = %cfg.clickhouse_url,
+        redis_url = %cfg.redis_url,
         log_json = cfg.log_json,
         "halley-ingester starting"
     );
 
+    // --- Storage and pipeline setup ---
+
     let ch = ClickHouseStore::new(&cfg);
-    let app = build_router(AppState { ch });
+
+    let publisher = Publisher::new(&cfg.redis_url)
+        .await
+        .context("connect publisher to Redis")?;
+
+    let writer =
+        Writer::new(&cfg.redis_url, ch.clone(), "writer-0".to_string()).context("create writer")?;
+
+    // Graceful shutdown channel. Sender fires `true` on SIGINT/SIGTERM.
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+    // Spawn the writer task. It runs independently of axum.
+    // IMPORTANT: tokio::spawn so the writer does not block the receiver.
+    let writer_handle = tokio::spawn(async move {
+        writer.run(shutdown_rx).await;
+    });
+
+    // --- gRPC server (OTLP :4317) ---
+
+    let grpc_normalizer = Arc::new(Normalizer::new());
+    let grpc_publisher = Arc::new(Mutex::new(
+        Publisher::new(&cfg.redis_url)
+            .await
+            .context("connect gRPC publisher to Redis")?,
+    ));
+
+    let trace_service = HalleyTraceService {
+        normalizer: grpc_normalizer,
+        publisher: grpc_publisher,
+    };
+
+    let grpc_addr = cfg.grpc_addr;
+    let grpc_handle = tokio::spawn(async move {
+        info!(addr = %grpc_addr, "gRPC server listening");
+        if let Err(e) = TonicServer::builder()
+            .add_service(TraceServiceServer::new(trace_service))
+            .serve(grpc_addr)
+            .await
+        {
+            tracing::error!(error = %e, "gRPC server error");
+        }
+    });
+
+    // --- HTTP server ---
+
+    let state = AppState {
+        ch,
+        publisher: Arc::new(Mutex::new(publisher)),
+        normalizer: Arc::new(Normalizer::new()),
+    };
+    let app = build_router(state);
 
     let listener = tokio::net::TcpListener::bind(cfg.http_addr)
         .await
@@ -50,6 +113,23 @@ async fn main() -> anyhow::Result<()> {
         .with_graceful_shutdown(shutdown_signal())
         .await
         .context("axum::serve")?;
+
+    // --- Graceful shutdown ---
+
+    info!("HTTP server stopped, signaling writer to drain");
+    // Signal the writer to finish its current batch and exit.
+    let _ = shutdown_tx.send(true);
+
+    // Wait for the writer to drain. Give it up to 10 seconds.
+    match tokio::time::timeout(std::time::Duration::from_secs(10), writer_handle).await {
+        Ok(Ok(())) => info!("writer drained cleanly"),
+        Ok(Err(e)) => tracing::warn!(error = %e, "writer task panicked"),
+        Err(_) => tracing::warn!("writer did not drain within 10s, forcing exit"),
+    }
+
+    // Abort the gRPC server (it has no drain semantics; in-flight RPCs complete
+    // before the task exits because tonic handles that internally).
+    grpc_handle.abort();
 
     info!("halley-ingester stopped");
     Ok(())
@@ -80,8 +160,7 @@ fn init_tracing(cfg: &Config) {
 }
 
 /// Wait for Ctrl+C or SIGTERM, then return so axum exits gracefully.
-/// `docker compose down` sends SIGTERM; the plan's Day 3 acceptance
-/// requires not leaking connections on shutdown.
+/// `docker compose down` sends SIGTERM.
 async fn shutdown_signal() {
     use tokio::signal;
 

@@ -24,6 +24,11 @@ pub struct Config {
     pub clickhouse_user: String,
     /// ClickHouse password. Empty is accepted for local dev (see DECISIONS D14).
     pub clickhouse_password: String,
+    /// Redis connection URL (e.g. `redis://redis:6379/0`).
+    /// Used for the `halley:spans` stream pipeline. See DECISIONS.md D26.
+    pub redis_url: String,
+    /// gRPC bind address for the OTLP/gRPC receiver (e.g. `0.0.0.0:4317`).
+    pub grpc_addr: SocketAddr,
 }
 
 #[derive(Debug, Error)]
@@ -80,6 +85,13 @@ impl Config {
             clickhouse_database,
             clickhouse_user,
             clickhouse_password,
+            redis_url: required("REDIS_URL")?,
+            grpc_addr: required("INGESTER_GRPC_ADDR")?.parse().map_err(
+                |e: std::net::AddrParseError| ConfigError::Invalid {
+                    var: "INGESTER_GRPC_ADDR",
+                    reason: e.to_string(),
+                },
+            )?,
         })
     }
 }
