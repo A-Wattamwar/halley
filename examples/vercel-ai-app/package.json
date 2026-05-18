@@ -1,0 +1,26 @@
+{
+    "name": "vercel-ai-app",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "dev": "next dev",
+        "build": "next build",
+        "start": "next start",
+        "lint": "next lint"
+    },
+    "dependencies": {
+        "@ai-sdk/openai": "^3.0.64",
+        "@opentelemetry/exporter-trace-otlp-http": "^0.57.2",
+        "@opentelemetry/sdk-node": "^0.57.2",
+        "ai": "^6.0.185",
+        "next": "14.2.35",
+        "react": "^18",
+        "react-dom": "^18"
+    },
+    "devDependencies": {
+        "@types/node": "^20",
+        "@types/react": "^18",
+        "@types/react-dom": "^18",
+        "typescript": "^5"
+    }
+}
