@@ -781,3 +781,138 @@ is stored in `AppState` and called in the `GET /metrics` handler.
 **Bottleneck:** The ingester receiver is not the bottleneck — a 5-second sanity check with 5 VUs achieved ~9K RPS. At 5K RPS sustained, the single ClickHouse writer task becomes the constraint. The writer batches 500 spans or 100ms, whichever comes first; at 5K ingest RPS, the writer can only drain ~4.8K spans/sec, causing the Redis stream to grow during the test. The Redis buffer absorbed the burst correctly and the writer drained everything after the test ended. p99 latency exceeded the 50ms target because the `XADD` call occasionally queues behind the writer's batch flush under sustained load.
 
 **No tuning was performed.** The achieved rate (4,792 RPS) is above the 1K RPS threshold for iteration. The bottleneck is the single writer task; adding a second writer instance (consumer group supports it without code changes) would likely push throughput past 5K RPS.
+
+---
+
+## 2026-05-15 — Phase 3 Week 5 Day 1
+
+### D41. No proprietary `@halley/sdk` shipped in Phase 3 (or any phase without user demand)
+
+Halley's core pitch is "we ingest whatever your app already emits via OTLP."
+Shipping a proprietary SDK contradicts that pitch in two ways:
+
+1. It implies that Halley requires the SDK to work, which is false. Any
+   OTLP-emitting stack (OpenLLMetry, OpenInference, Vercel AI SDK, raw
+   `@opentelemetry/sdk-node`) works with Halley today without any Halley-specific
+   package. A proprietary SDK creates a false dependency in users' minds.
+
+2. It creates a maintenance burden with no validated user need. An SDK that
+   wraps OTEL with "sensible defaults" is a thin layer that will drift from
+   the underlying OTEL SDK as OTEL evolves. We would be maintaining a wrapper
+   for a problem users have not yet told us they have.
+
+The correct approach: ship 5-10 line quickstart snippets per language that show
+users how to point their existing OTEL setup at Halley's OTLP endpoint. If real
+users post-launch ask for a wrapper (e.g., "I don't want to configure OTEL
+myself"), build one in Phase 6 with their specific requirements. Building
+speculatively without users is worse than not building at all.
+
+ROADMAP North-star item #3 updated from "`@halley/sdk` published to npm as
+v0.1.0" to "Three example apps in three different stacks emit real OpenAI traces
+into one Halley dashboard." See ROADMAP v0.5 revision log entry.
+
+### D42. Pricing-version migration pattern: same UUID, later `effective_from`
+
+When updating `pricing_versions` with real values (replacing Phase 1 placeholder
+zeros), we reuse the existing `pricing_version_id`
+(`00000000-0000-0000-0000-000000000001`) and insert new rows with a later
+`effective_from` timestamp. `ReplacingMergeTree(effective_from)` deduplicates
+rows with the same `ORDER BY` key `(pricing_version_id, model)`, keeping the
+row with the highest `effective_from` value after background merge.
+
+**Why reuse the same UUID instead of a new one:**
+- All existing `observations` rows from Phase 1/2 already reference
+  `pricing_version_id = 00000000-0000-0000-0000-000000000001`. Reusing the
+  same UUID means those rows automatically pick up the real prices on the next
+  read-time cost computation — no backfill needed.
+- This is the desired behavior: retroactive repricing of dev observations proves
+  that Phase 4's read-time cost computation works correctly. Dev observations
+  are not production data; repricing them is a feature, not a bug.
+- A new UUID would require either a backfill of `observations.pricing_version_id`
+  (expensive, unnecessary) or leaving dev observations pointing at zero-cost
+  rows forever (misleading for dashboard testing).
+
+**Dedup timing caveat:** `ReplacingMergeTree` dedup is eventual — it happens
+on background merge, not immediately after INSERT. After the migration runs,
+`SELECT * FROM pricing_versions` may still show both the old zero rows and the
+new real-value rows for a few minutes. Use
+`SELECT * FROM pricing_versions FINAL ORDER BY effective_from DESC` for the
+canonical view, or wait for merge. The `FINAL` modifier forces dedup at query
+time. This is documented in the migration file header and in the Week 5 common
+pitfalls section.
+
+**One SQL statement per migration file (D24 constraint):** The pricing update
+is a single `INSERT INTO` statement, so it fits in one file. No DDL change
+needed — the table schema is unchanged.
+
+### D43. gpt-4o-mini only for all example app runs; gpt-4o in pricing_versions only
+
+All three example apps (`reasoning-agent-python`, `vercel-ai-app`,
+`openai-direct-typescript`) use `gpt-4o-mini` exclusively. No code we run
+calls `gpt-4o`. Budget: ~$0.005 per run, ~400 runs available on the $5 key.
+
+`gpt-4o` is present in `pricing_versions` with real pricing because real users
+of Halley may use it, and we want their cost data to be correct from day one.
+Its presence in the pricing table does not imply we call it.
+
+This supersedes the original D-7 guardrail in `docs/plan/phase-3-week-5.md`,
+which reserved `gpt-4o` for the README demo capture. The README demo will also
+use `gpt-4o-mini`. The quality difference is not visible in a trace viewer
+screenshot.
+
+---
+
+## 2026-05-15 — Phase 3 Week 5 Day 2
+
+### D44. Traceloop SDK 0.55+ migrated to OTEL GenAI semconv; openllmetry adapter is now legacy-only
+
+**Discovery:** When running `traceloop-sdk 0.60.0` (the current pip-latest as of
+2026-05-15) against Halley, spans landed as `source_dialect = "otel-genai"` rather
+than `"openllmetry"`. Investigation confirmed this is intentional and permanent.
+
+**What changed in the SDK:**
+
+`traceloop-sdk 0.55.0` (released 2026-03-29) shipped PR #3844: "feat(open-ai):
+instrumentation to support OTel GenAI Semantic Conventions 0.5.1." This PR
+replaced the legacy `SpanAttributes` / `traceloop.*` namespace with upstream
+`gen_ai.*` attributes from the OTEL GenAI Semantic Conventions 0.5.0 spec.
+Specifically:
+- `traceloop.span.kind`, `traceloop.entity.name`, `traceloop.entity.input`,
+  `traceloop.entity.output` — no longer emitted on LLM spans.
+- `gen_ai.operation.name`, `gen_ai.request.model`, `gen_ai.usage.input_tokens`,
+  `gen_ai.usage.output_tokens` — now the primary attributes.
+- `openai.response.service_tier`, `gen_ai.openai.api_base` — OpenAI-specific
+  extras still present, but no `traceloop.*` keys.
+
+Subsequent releases (0.56–0.60) migrated other providers (Gemini, Bedrock,
+LangChain, LlamaIndex, Groq) to the same OTEL GenAI semconv standard.
+
+**Impact on Halley's normalizer:**
+
+Halley's `openllmetry` adapter detects spans by the presence of any `traceloop.*`
+attribute key (D31). With 0.55+, no such keys are emitted. Spans correctly fall
+through to the `otel-genai` adapter, which handles them perfectly — model ID,
+token counts, operation name all normalize correctly.
+
+**Decision:**
+
+Accept this as correct behavior. The `openllmetry` adapter remains in the
+normalizer for users on `traceloop-sdk < 0.55` (legacy `traceloop.*` namespace).
+Modern versions (0.55+) flow through `otel-genai`. This is the right outcome:
+Traceloop converging on the OTEL standard means their users' traffic is
+indistinguishable from any other OTEL GenAI-compliant instrumentation, which is
+exactly what Halley's "normalize, don't reject" design is built for.
+
+**No ingester code change needed.** The existing adapter priority order handles
+both old and new Traceloop traffic correctly.
+
+**Implication for the three example apps (Week 5):**
+
+The original plan had three distinct dialect paths: openllmetry (Day 2),
+vercel-ai (Day 3), openllmetry (Day 4). With this finding, Day 4 is changed to
+use OpenInference instrumentation instead, giving three genuinely distinct paths:
+- Day 2 (Reasoning Agent): `otel-genai` (Traceloop 0.55+)
+- Day 3 (Vercel AI app): `vercel-ai`
+- Day 4 (Direct TypeScript): `openinference`
+
+See `docs/research/openllmetry-2026-migration.md` for the full research note.

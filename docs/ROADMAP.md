@@ -1,6 +1,6 @@
 # Halley — Roadmap
 
-Version: 0.2 (May 13, 2026)
+Version: 0.5 (May 15, 2026)
 Owner: Ayush Wattamwar
 
 Living plan. When direction changes mid-build, we update this file first, then the code. Truth base for "what are we doing this week."
@@ -31,7 +31,7 @@ By end of summer, Halley must have:
 
 1. Public GitHub repo with clean commit history and polished README.
 2. `docker compose up` stands up the full stack in under 60 seconds.
-3. `@halley/sdk` published to npm as v0.1.0 (optional convenience wrapper).
+3. Three example apps in three different stacks (Python OpenLLMetry, Vercel AI SDK, direct TypeScript) emit real OpenAI traces into one Halley dashboard.
 4. `halley` CLI published as a standalone Rust binary and a GitHub Action.
 5. End-to-end ingestion at 5,000+ spans/sec on a single laptop-class VM, verified with a load test.
 6. Normalizer passes property-based tests proving round-trip correctness for four dialects: OTEL GenAI, OpenLLMetry, OpenInference, Vercel AI SDK.
@@ -82,38 +82,33 @@ All shipped, even if imperfect = we did. Any one missing = we did not.
 
 **Deliverable**: ingester passes sustained load test, published compatibility matrix (four dialects), `halley_body_dedup_ratio` metric visible.
 
-### Phase 3: SDK and first real traces (Weeks 5-6, June 10 - June 23)
+### Phase 3: Real traces and the dashboard becoming usable (Weeks 5-6, June 10 - June 23)
 
 **Goal**: Three example apps, three different instrumentation libraries, one dashboard.
 
-- [ ] `@halley/sdk` on `@opentelemetry/sdk-node`, OTLP exporter preconfigured, helpers `halley.run`, `halley.step`, `halley.feedback`, `halley.markToolEffect`.
-- [ ] Offline queueing: in-memory ring + disk spillover.
-- [ ] SDK unit tests >=80% coverage.
-- [ ] Example 1: Ayush's Reasoning Agent instrumented with OpenLLMetry (no Halley SDK).
-- [ ] Example 2: a minimal LangChain agent instrumented via OpenInference.
-- [ ] Example 3: a Vercel AI SDK app instrumented via its native OTEL export.
+- [ ] Example 1: Ayush's Reasoning Agent (Python) instrumented with OpenLLMetry. Lands with `source_dialect = "openllmetry"`.
+- [ ] Example 2: Vercel AI SDK app (Next.js) emitting traces via its native OTEL export. Lands with `source_dialect = "vercel-ai"`.
+- [ ] Example 3: Direct TypeScript app (Node.js + OpenAI SDK + OpenLLMetry). Lands with `source_dialect = "openllmetry"`.
 - [ ] All three land in the same dashboard with correct canonical schema; published screenshot proves it.
-- [ ] Publish `@halley/sdk` v0.1.0 to npm.
+- [ ] Quickstart docs for Python, TypeScript, and Vercel AI SDK under `docs/quickstart/`.
+- [ ] Real OpenAI pricing in `pricing_versions` for `gpt-4o-mini` and `gpt-4o`.
+- [ ] Dashboard runs list + run detail (pulled forward from Phase 4): paginated runs table, timeline view, reasoning graph via `reactflow`, span inspector sidebar.
 
-**Deliverable**: `npm install @halley/sdk` works but is explicitly optional; three example apps under `examples/` prove polyglot ingest.
+**Deliverable**: Three example apps under `examples/` prove polyglot ingest. Dashboard is demoable to a real developer.
 
 ### Phase 4: Dashboard core (Weeks 7-8, June 24 - July 7)
 
-**Goal**: Dashboard usable for real debugging. Scope tightened from v0.1.
+**Goal**: Dashboard usable for real debugging. Auth, live updates, API keys.
 
-- [ ] Next.js 14 App Router, Tailwind, shadcn/ui.
 - [ ] Auth.js with email+password + Postgres adapter. Login, project switching.
 - [ ] API keys page: create, rotate, revoke.
-- [ ] Runs list: server-rendered, paginated by time, two filters (project, time range). Sort by start_time desc only.
-- [ ] Run detail: timeline + reasoning graph via `reactflow` + span inspector (prompt, completion, tool I/O, token counts, cost, timing).
-- [ ] Cost is computed at read time from `pricing_versions`.
 - [ ] Single `halley-query` module enforces project-scoped auth; all server components route through it.
 - [ ] WebSocket endpoint `/api/ws/runs/:id` subscribed to Redis Pub/Sub; live updates.
 - [ ] One Playwright E2E: emit span via SDK -> see it in dashboard within 2 seconds.
 
 **Explicitly cut from v0.1**: full-text search over content, infinite scroll, column sorting, cmd+k palette, keyboard nav. Push to Phase 6 polish if time allows.
 
-**Deliverable**: a dashboard a real developer would use to debug an agent.
+**Deliverable**: a dashboard a real developer would use to debug an agent, with auth and live updates.
 
 ### Phase 5: The hero loop (Weeks 9-10, July 8 - July 21)
 
@@ -207,4 +202,4 @@ Also: interview prep, resume rewrite, LinkedIn refresh, outreach.
 | 2026-05-13 | 0.1 | Initial plan | Project kickoff |
 | 2026-05-13 | 0.2 | Pivoted hero thesis to "production runs become regression tests." Phase 2 now centers the normalizer with property tests. Phase 5 rebuilt around cassette capture, invariant inference, halley CLI, replay modes, bisect, tool-effect-safe fork. Dashboard scope in Phase 4 tightened. Added `halley` CLI and GitHub Action as first-class deliverables. | May 13 research showed original differentiators (OTLP-native ingest, agent replay) were already shipped by Langfuse v4 and Laminar. Repositioned around the production-to-regression loop no one closes today. |
 | 2026-05-18 | 0.3 | Week 1 complete. Phase 1 ingester fully shipped (insert path, Dockerfile, smoke test). All Week 1 checklist items done. | Ran ahead of schedule; shipped insert path and Dockerfile in Week 1 instead of leaving for Week 2. |
-| 2026-05-19 | 0.4 | Week 2 complete. Dashboard placeholder, dbmate migration tooling, research notes. Phase 1 deliverable met. | |
+| 2026-05-15 | 0.5 | Phase 3 reshape — SDK dropped in favor of OTEL-direct quickstart docs and three working example apps. Dashboard runs list + run detail pulled forward from Phase 4 into Phase 3 Week 6. Phase 4 scope reduced to auth + live updates only. North-star item #3 updated from `@halley/sdk` to three example apps. Decision rationale in DECISIONS.md D41. | Halley's pitch is "ingest whatever your app already emits." A proprietary SDK contradicts that. Pulling the dashboard forward gets a demoable product two weeks earlier. |

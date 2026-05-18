@@ -1,0 +1,20 @@
+{
+    "name": "openai-direct-typescript",
+    "version": "0.1.0",
+    "private": true,
+    "scripts": {
+        "start": "npx tsx src/index.ts",
+        "dev": "npx tsx src/index.ts"
+    },
+    "dependencies": {
+        "@arizeai/openinference-instrumentation-openai": "^4.1.1",
+        "@opentelemetry/exporter-trace-otlp-http": "^0.57.2",
+        "@opentelemetry/sdk-node": "^0.57.2",
+        "openai": "^6.38.0"
+    },
+    "devDependencies": {
+        "@types/node": "^20",
+        "tsx": "^4.19.4",
+        "typescript": "^5"
+    }
+}

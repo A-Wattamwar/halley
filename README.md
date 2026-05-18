@@ -140,12 +140,14 @@ Halley normalizes spans from five dialects into a single canonical schema. No co
 | Dialect | Detection | Status | Adapter |
 |---|---|---|---|
 | halley-raw | `source_dialect = "halley-raw"` field | ✅ Stable | [halley_raw.rs](ingester/src/normalizer/halley_raw.rs) |
-| OpenLLMetry / Traceloop | any `traceloop.*` attribute | ✅ Supported | [openllmetry.rs](ingester/src/normalizer/openllmetry.rs) |
+| OpenLLMetry / Traceloop (legacy) | any `traceloop.*` attribute | ✅ Supported | [openllmetry.rs](ingester/src/normalizer/openllmetry.rs) |
 | OpenInference / Phoenix | `openinference.span.kind` or `llm.model_name` | ✅ Supported | [openinference.rs](ingester/src/normalizer/openinference.rs) |
 | Vercel AI SDK | `ai.operationId` or `ai.model.*` | ✅ Supported | [vercel_ai.rs](ingester/src/normalizer/vercel_ai.rs) |
 | OTEL GenAI semconv | `gen_ai.system` or `gen_ai.provider.name` (fallback) | ✅ Supported | [otel_genai.rs](ingester/src/normalizer/otel_genai.rs) |
 
 Detection runs in priority order: halley-raw → OpenLLMetry → OpenInference → Vercel AI → OTEL GenAI. Unknown attributes from any dialect are preserved verbatim in the `attributes` map and never dropped.
+
+> **Note on OpenLLMetry / Traceloop:** `traceloop-sdk >= 0.55.0` (released 2026-03-29) migrated to pure OTEL GenAI semconv and no longer emits `traceloop.*` attributes. Traffic from modern Traceloop versions routes through the `otel-genai` adapter. The `openllmetry` adapter handles users on `traceloop-sdk < 0.55` (legacy `traceloop.*` namespace). See [`docs/research/openllmetry-2026-migration.md`](docs/research/openllmetry-2026-migration.md).
 
 ---
 
@@ -178,6 +180,18 @@ docker compose up
 ```
 
 Point any OTLP-instrumented AI app at the ingester. Real agent traces start flowing. Click "Turn this run into a test" on any production run to save it into your repo's fixture library. Add `halley ci` to your existing test workflow.
+
+### What instrumentation are you using?
+
+Pick the quickstart that matches your stack:
+
+| Stack | Quickstart | `source_dialect` |
+|---|---|---|
+| Python + OpenAI (Traceloop / OpenLLMetry) | [quickstart-python.md](docs/quickstart/quickstart-python.md) | `otel-genai` |
+| Node.js + OpenAI (OpenInference) | [quickstart-typescript.md](docs/quickstart/quickstart-typescript.md) | `openinference` |
+| Next.js + Vercel AI SDK | [quickstart-vercel.md](docs/quickstart/quickstart-vercel.md) | `vercel-ai` |
+
+Each quickstart is under 150 lines: prerequisites, install, setup snippet, verification SQL, and a link to a fully working example app under `examples/`.
 
 ---
 

@@ -34,7 +34,7 @@ This doc is the single source of truth for Week 5. Read `docs/plan/phase-3-overv
 
 Carry-over from Phase 2 Week 4 disciplines. Plus Phase 3-specific:
 
-**D-7 (OpenAI key budget)**: $5 total. Use `gpt-4o-mini` for all development runs (~$0.001-0.005 per run). Reserve `gpt-4o` ($0.01-0.05 per run) for the README demo capture only. Budget guardrail: **20 runs per example app during development**, **3 final-quality runs at end of Day 6** for the screenshot.
+**D-7 (OpenAI key budget)**: $5 total. **All runs use `gpt-4o-mini` only** (~$0.005 per run). Budget allows ~400 runs across all three example apps over the phase — more than enough. `gpt-4o` is present in `pricing_versions` for real-user cost data correctness but is never called from any code we run. Budget guardrail: **20 runs per example app during development**, **3 final-quality runs at end of Day 6** for the screenshot. All use `gpt-4o-mini`.
 
 **D-8 (no Docker rebuild this week)**: The ingester does not change in Week 5. Example apps live under `examples/` and are external clients. No `docker compose build ingester` calls all week.
 
@@ -170,33 +170,46 @@ Work:
 
 **Acceptance Day 3**: Vercel AI app emits traces visible in ClickHouse.
 
-### Day 4: Direct TypeScript + OpenLLMetry example
+### Day 4: Direct TypeScript + OpenInference auto-instrumentation
 
 **Container rebuild today: NO**.
+
+**Context (updated from original plan):** The original Day 4 called for
+`@traceloop/node-server-sdk` (OpenLLMetry Node). Day 2 research showed that
+`traceloop-sdk 0.55+` emits pure OTEL GenAI semconv — no `traceloop.*` keys —
+so it routes through the `otel-genai` adapter, same as Day 2. To demonstrate
+three genuinely distinct dialect paths, Day 4 uses OpenInference
+auto-instrumentation instead, which emits `openinference.*` attributes and
+routes through the `openinference` adapter. See DECISIONS.md D44.
 
 Work:
 
 1. New directory `examples/openai-direct-typescript/`. Minimal Node.js app:
    ```bash
-   cd examples/openai-direct-typescript
    npm init -y
-   npm install openai @traceloop/node-server-sdk
+   npm install openai \
+     @arizeai/openinference-instrumentation-openai \
+     @opentelemetry/sdk-node \
+     @opentelemetry/exporter-trace-otlp-http
    ```
 
-2. Single TypeScript file (`src/index.ts`) ~30-50 lines:
-   - Initialize Traceloop SDK (OpenLLMetry Node) with `apiEndpoint: "http://localhost:4318"`.
+2. Single TypeScript file (`src/index.ts`) ~40-50 lines:
+   - Initialize OTEL `NodeSDK` with `OTLPTraceExporter` pointing at
+     `OTEL_EXPORTER_OTLP_ENDPOINT` (default `http://localhost:4318/v1/traces`).
+   - Register `OpenAIInstrumentation` from `@arizeai/openinference-instrumentation-openai`.
    - Make 3-5 OpenAI chat completion calls with different prompts.
    - Print "done" and exit.
 
 3. Use `tsx` or `ts-node` for execution. Document run command in the README.
 
 4. Run the example. Verify in ClickHouse:
-   - 3-5 rows with `source_dialect = "openllmetry"` (Traceloop's instrumentation emits `traceloop.*` attributes which our adapter detects).
-   - Real model id, tokens.
+   - 3-5 rows with `source_dialect = "openinference"`.
+   - `gen_ai_request_model = "gpt-4o-mini"`.
+   - Token counts non-zero.
 
-**Verification**: example runs, traces land.
+**Verification**: example runs, traces land with `source_dialect = "openinference"`.
 
-**Acceptance Day 4**: Direct TypeScript example traces visible.
+**Acceptance Day 4**: Direct TypeScript example traces visible with correct dialect.
 
 ### Day 5: Quickstart docs
 
@@ -262,7 +275,7 @@ Work:
 
 ### Direct TypeScript example
 - [ ] `examples/openai-direct-typescript/` exists, runs with `npm run start` or `npx tsx src/index.ts`.
-- [ ] One example run lands traces with `source_dialect = "openllmetry"` (Traceloop emits this dialect).
+- [ ] One example run lands traces with `source_dialect = "openinference"` (OpenInference instrumentation for OpenAI).
 
 ### Quickstart docs
 - [ ] Three quickstart files under `docs/quickstart/`.
@@ -308,3 +321,88 @@ Work:
 ## When to stop
 
 Week 5 is done when every reviewer-checklist item passes. If finished early, do not start Week 6. Use the time to expand the quickstart docs with troubleshooting sections, or take real screenshots of the example apps' traces in the dashboard for the README. Write the Week 5 retro at the bottom of this file.
+
+---
+
+## Week 5 retro
+
+### What shipped
+
+All six reviewer checklist sections pass.
+
+**Day 1 — ROADMAP + pricing migration + research**
+- ROADMAP updated to v0.5. North-star item #3 changed from `@halley/sdk` to three example apps.
+- D41 (no SDK), D42 (pricing migration pattern), D43 (gpt-4o-mini only) added to DECISIONS.md.
+- ClickHouse migration `20260515000001_openai_pricing_real_values.sql` applied. Real OpenAI pricing for `gpt-4o-mini` ($0.150/$0.600/$0.075) and `gpt-4o` ($2.500/$10.000/$1.250) now in `pricing_versions`.
+- Two research notes written: `openllmetry-python-setup.md`, `vercel-ai-telemetry-setup.md`.
+
+**Day 2 — Reasoning Agent (Python)**
+- `examples/reasoning-agent-python/` created. All 6 source files from the original CSE 476 project copied verbatim; only `api.py` replaced with an OpenAI SDK adapter (same function signature).
+- `Traceloop.init(app_name="reasoning-agent", disable_batch=True)` added to `agent.py`.
+- One real run: question "Solve: 47 * 23 + 19", answer 1100 (correct). 5 spans landed.
+- **Pivot**: spans landed as `source_dialect = "otel-genai"`, not `"openllmetry"`. Investigated and documented (see below).
+
+**Day 3 — Vercel AI SDK (Next.js)**
+- `examples/vercel-ai-app/` created. Next.js 14.2.35, `instrumentation.ts`, server action with `experimental_telemetry: { isEnabled: true }`.
+- `npm run build` clean. One real run: "What is the capital of France?" → "Paris." 2 spans landed as `source_dialect = "vercel-ai"`. ✓
+
+**Day 4 — Direct TypeScript + OpenInference**
+- `examples/openai-direct-typescript/` created. `@arizeai/openinference-instrumentation-openai@4.1.1` + `openai@6.38.0`.
+- **ESM hoisting issue** encountered and resolved (see below).
+- One real run: 4 questions, 4 correct answers. 4 spans landed as `source_dialect = "openinference"`. ✓
+
+**Day 5 — Quickstart docs**
+- `docs/quickstart/quickstart-python.md` (101 lines)
+- `docs/quickstart/quickstart-typescript.md` (115 lines)
+- `docs/quickstart/quickstart-vercel.md` (139 lines)
+- README "Getting started" updated with "What instrumentation are you using?" subsection.
+
+**Day 6 — Hygiene**
+- `cargo build / clippy / fmt / test` all clean. Ingester unchanged all week (D-8 respected).
+- `make smoke` 20/20 passed.
+
+---
+
+### What slipped
+
+Nothing slipped from the original scope. The Day 4 plan was deliberately changed (not slipped) from Traceloop Node to OpenInference to get three genuinely distinct dialect paths.
+
+---
+
+### What surprised
+
+**1. Traceloop SDK 0.55+ migrated to pure OTEL GenAI semconv (Day 2)**
+
+The biggest finding of the week. `traceloop-sdk 0.60.0` (pip-latest) no longer emits `traceloop.*` attributes. PR #3844 (merged 2026-03-29) replaced the entire legacy `SpanAttributes` namespace with upstream `gen_ai.*` attributes from OTEL GenAI Semantic Conventions 0.5.0.
+
+Impact: the Reasoning Agent traces landed as `source_dialect = "otel-genai"` instead of `"openllmetry"`. This is correct behavior — the otel-genai adapter handled the traffic perfectly. The `openllmetry` adapter is now a legacy compatibility layer for users on `traceloop-sdk < 0.55`.
+
+This also invalidated the original Day 4 plan (Traceloop Node would have produced the same `otel-genai` dialect as Day 2). Pivoted to OpenInference to get three distinct paths.
+
+Documented in: DECISIONS.md D44, `docs/research/openllmetry-2026-migration.md`.
+
+**2. ESM import hoisting breaks OpenInference instrumentation (Day 4)**
+
+TypeScript `import` statements are hoisted to the top of the compiled output. This means `import OpenAI from "openai"` executes before `sdk.start()` runs, so the OpenInference instrumentation patch never applies — zero spans emitted.
+
+Fix: use `require("openai")` after `sdk.start()`. This is the standard OTEL auto-instrumentation pattern for Node.js CJS environments, but it's not obvious when writing TypeScript.
+
+Two failed runs before the fix (spans not exported at all, not even as wrong dialect). Documented in the example README and the TypeScript quickstart.
+
+**3. OpenInference captures the resolved model snapshot name**
+
+`gen_ai_request_model` for OpenInference spans is `"gpt-4o-mini-2024-07-18"` (the resolved snapshot) rather than `"gpt-4o-mini"` (the alias). This is correct — OpenInference captures what OpenAI actually used. Documented in the TypeScript quickstart verification section.
+
+**4. Total OpenAI cost was essentially zero**
+
+Across all three example apps and multiple debug runs: 375 input tokens + 29 output tokens total. At gpt-4o-mini rates: **~$0.000074** (less than one-tenth of a cent). The $5 budget is essentially untouched. The D-7 guardrail of 20 runs per example was never close to being hit.
+
+---
+
+### Three dialect paths confirmed
+
+| Example | Instrumentation | `source_dialect` | Spans |
+|---|---|---|---|
+| `reasoning-agent-python/` | Traceloop 0.60 (OTEL GenAI semconv) | `otel-genai` | 5 |
+| `vercel-ai-app/` | Vercel AI SDK native telemetry | `vercel-ai` | 2 |
+| `openai-direct-typescript/` | OpenInference auto-instrumentation | `openinference` | 4 |
