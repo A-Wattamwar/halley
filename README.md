@@ -195,6 +195,20 @@ Each quickstart is under 150 lines: prerequisites, install, setup snippet, verif
 
 ---
 
+## What it looks like
+
+**Runs list** — every agent run in one view with dialect, token counts, cost, and status at a glance.
+
+![Halley runs list — 4 runs including the reasoning-agent, hello-world, otel-genai, and openllmetry traces](docs/screenshots/runs-list.png)
+
+**Run detail with span inspector** — click any span bar to open the inspector. Here the CoT Verify span is selected, showing timing, identity fields (click to copy), model, usage, and the full input/output bodies as pretty-printed JSON.
+
+![Halley run detail page for the reasoning-agent run, with the span inspector open on the CoT verify span](docs/screenshots/run-detail-inspector.png)
+
+The graph view (Timeline | Graph tab) shows the same spans as a dagre-laid-out ReactFlow graph, with parent→child edges and the same operation-color palette.
+
+---
+
 ## Performance
 
 Single-node HTTP ingest load test (Phase 2, Week 4).

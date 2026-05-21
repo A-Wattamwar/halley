@@ -311,3 +311,27 @@ Work:
 Phase 3 is done when every reviewer-checklist item passes. If finished early, do not start Phase 4. Use the time to take more screenshots of different runs, polish the styling of the run detail page, or write a 1-paragraph "Concepts" doc in `docs/quickstart/concepts.md` defining run vs span vs trace for users.
 
 The Phase 3 retro is the final artifact of the phase. It feeds the Phase 4 plan I will draft after Week 6 ships.
+
+---
+
+## Phase 3 retro
+
+_Written 2026-05-21. Covers Week 5 (ingester normalizers + pricing) and Week 6 (dashboard trace viewer)._
+
+### What shipped
+
+**Week 5:** Five dialect normalizers (halley-raw, otel-genai, OpenLLMetry, OpenInference, Vercel AI). Real pricing in `halley.pricing_versions` (gpt-4o-mini: $0.15/$0.60 per million tokens). `is_run_root` column and run-grouping logic. Three fully working example apps (Python reasoning agent, TypeScript OpenInference, Next.js Vercel AI SDK). `make smoke` end-to-end validation across gRPC, HTTP/proto, and HTTP/JSON ingest paths.
+
+**Week 6:** Complete browser dashboard: runs list with dialect badges, token counts, and per-run cost; run detail page with Gantt-style timeline; span inspector sidebar (timing, identity, model, usage, input/output bodies with copy, collapsible attributes); Timeline ↔ Graph tab with dagre-laid-out ReactFlow graph; URL-param filter system (time range, span selection) using `<Link>` for zero-JS navigation. Total: 7 new files, ~1,500 lines of dashboard code across 6 working days.
+
+### What slipped
+
+The `is_run_root` Boolean was added but the UI never uses it for anything beyond a badge. No auth, no multi-project support, no infinite scroll — all deferred per original plan.
+
+### What surprised
+
+ReactFlow's SSR isolation was simpler than expected: two-file pattern (`SpanGraph.tsx` + `SpanGraphWrapper.tsx`) with `next/dynamic({ ssr: false })` kept the shared bundle flat at 87.8 kB. The pricing migration not having been applied to the live Docker volume (data persisted from before the migration) was a subtle ops gotcha — applying via HTTP API fixed it in one curl call. Deriving `RunSummary` from the span list in JS (instead of a second `GROUP BY` query) was the right call: simpler query, same result, one fewer DB round-trip.
+
+### What's owed at start of Phase 4
+
+Auth (API keys, project isolation), WebSocket live-update stream, cassette-to-fixture promotion UI, `halley ci` CLI for replay in CI, `halley bisect`, and multi-project support. The dashboard is functionally complete as a read-only trace viewer; Phase 4 makes it writable.
