@@ -916,3 +916,115 @@ use OpenInference instrumentation instead, giving three genuinely distinct paths
 - Day 4 (Direct TypeScript): `openinference`
 
 See `docs/research/openllmetry-2026-migration.md` for the full research note.
+
+---
+
+## 2026-05-21 — Phase 3 Week 6 Day 1
+
+### D45. Flat spans table moved to `/spans`, not removed
+
+The Week 6 Day 1 plan (Phase 3 Week 6) says: "Remove the spans-list view from
+the existing page (if it was the entire page). Or keep it accessible at `/spans`
+for debugging — your call."
+
+**Choice: move to `/spans`, not removed.**
+
+Rationale:
+
+- During Days 2-4 of Week 6 (run detail, span inspector), the `/spans` flat
+  table is a fast sanity check: after running an example app, `GET /spans`
+  confirms that new observations landed in ClickHouse before debugging whether
+  the runs-list query groups them correctly. Removing it would force a ClickHouse
+  CLI query for that same check.
+- The route adds no maintenance burden: it is unchanged from Phase 1 except for
+  a breadcrumb link back to `/` and a "Debug view" badge. No new ClickHouse
+  queries, no new components.
+- Once Phase 4 ships auth and the dashboard becomes multi-user, `/spans` can be
+  gated or removed without breaking anything at `/`.
+
+The page at `dashboard/src/app/spans/page.tsx` is a verbatim copy of the
+original `page.tsx` with three additions: a "← Runs" breadcrumb, a "Debug view"
+badge, and the route file move. The original `page.tsx` is now the runs list.
+
+---
+
+## 2026-05-21 — Phase 3 Week 6 Day 2
+
+### D46. Vercel AI SDK outer-span token aggregation: acknowledged limitation, not fixed
+
+**Context:** Vercel AI SDK emits two span shapes for a single LLM call:
+- Outer span (`ai.generateText`, `ai.streamText`): token counts in
+  `attributes['ai.usage.inputTokens']` and `attributes['ai.usage.completionTokens']`
+  as strings in the `Map(String, String)` attributes column. The canonical
+  `gen_ai_usage_input_tokens` / `gen_ai_usage_output_tokens` columns are 0.
+- Inner span (`doGenerate`, `doStream`): token counts in both `ai.usage.*`
+  attributes AND the canonical `gen_ai_usage_*` columns.
+
+**Impact on the runs list:** `SUM(gen_ai_usage_input_tokens)` in `listRuns()`
+misses the outer span's tokens. For a simple `generateText` call, the run total
+is correct because the inner `doGenerate` span already carries the canonical
+columns. For runs using `streamText` without inner spans, the total would be
+under-counted.
+
+**Decision: acknowledge the limitation, do not fix it in Phase 3.**
+
+The fix would require a SQL expression like:
+```sql
+SUM(
+  CASE
+    WHEN source_dialect = 'vercel-ai'
+      AND gen_ai_usage_input_tokens = 0
+      AND attributes['ai.usage.inputTokens'] != ''
+    THEN toUInt64(attributes['ai.usage.inputTokens'])
+    ELSE gen_ai_usage_input_tokens
+  END
+) AS total_input_tokens
+```
+This adds complexity to the core `listRuns()` query and has edge cases
+(null string coercion, mixed-span runs). The Vercel AI SDK adapter already
+prefers `ai.usage.*` at write time (D40), so canonical columns are populated
+on inner spans. The dashboard token total is correct for the common case.
+
+The proper fix belongs in Phase 4 cost work, where the query can be tested
+against a broader set of real Vercel runs. Until then, a tooltip or note in
+the UI is not added (it would appear for all rows, not just Vercel ones, and
+would be confusing).
+
+**The runs list shows a footnote comment in code** (not in UI) pointing here.
+
+---
+
+## 2026-05-21 — Week 6 Day 5
+
+### D47. Reactflow graph shipped (not deferred); SSR isolation via dynamic(ssr:false) wrapper
+
+The Day 5 stretch goal was conditionally scheduled — attempt only if Days 1-4
+went cleanly (they did). The reactflow graph was implemented within the 3-hour
+budget.
+
+**Implementation approach:**
+
+- `reactflow` + `@dagrejs/dagre` added to `dashboard/` deps.
+- `SpanGraph.tsx` — Client Component (`"use client"`). Imports `reactflow` and
+  the dagre layout engine. Custom node type (`spanNode`) renders each span with
+  operation-color-coded backgrounds that match the Day 3 timeline palette.
+  `NODE_TYPES` constant defined at module scope (not inside the component) to
+  prevent ReactFlow re-registering node types on every render.
+- `SpanGraphWrapper.tsx` — thin Client Component that imports `SpanGraph` via
+  `next/dynamic({ ssr: false })`. This is the SSR isolation layer: ReactFlow
+  accesses `ResizeObserver`, `window.devicePixelRatio`, and other browser
+  globals at module init time. If Next.js attempted to evaluate the ReactFlow
+  module during server rendering it would throw. The `ssr: false` wrapper
+  ensures the heavy ReactFlow bundle never executes on the server.
+- `page.tsx` (Server Component) imports `SpanGraphWrapper` and renders it
+  conditionally when `?view=graph`. Tab bar uses `<Link>` so tab switches are
+  soft navigations (RSC re-render, no full reload).
+
+**Bundle cost:** The ReactFlow bundle is lazily loaded only when a user navigates
+to the Graph tab. The shared server-side bundle grew by only ~0.5 kB
+(the `SpanGraphWrapper` wrapper). The actual ~200 kB ReactFlow chunk loads
+client-side on demand.
+
+**Node click → inspector:** clicking a node pushes `?view=graph&span=<hex>` via
+`useRouter`. The existing `SpanInspector` (Days 4) handles the `?span=` param
+regardless of which `?view=` is active — no changes to the inspector were needed.
