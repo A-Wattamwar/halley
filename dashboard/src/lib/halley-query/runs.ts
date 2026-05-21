@@ -96,8 +96,8 @@ export async function listRuns(
           MAX(if(is_run_root, 1, 0))                        AS has_root,
           MAX(status)                                       AS worst_status
         FROM halley.observations
-        WHERE start_time >= {fromTime: String}
-          AND start_time <= {toTime: String}
+        WHERE start_time >= parseDateTimeBestEffort({fromTime: String})
+          AND start_time <= parseDateTimeBestEffort({toTime: String})
         GROUP BY run_id
         ORDER BY MIN(start_time) DESC
         LIMIT {limit: UInt32}
