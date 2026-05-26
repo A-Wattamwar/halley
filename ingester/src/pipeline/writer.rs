@@ -252,6 +252,30 @@ impl Writer {
 
             match insert_outcome {
                 InsertOutcome::Success => {
+                    // Publish to Redis pubsub for each span in the batch (fire-and-forget).
+                    // See phase-4-overview.md Week 8 Day 1.
+                    let mut pipe = redis::pipe();
+                    for obs in &obs_rows {
+                        let run_id_hex = hex::encode(obs.run_id);
+                        let channel = format!("halley:live:{}", run_id_hex);
+                        let status_str = match obs.status {
+                            crate::domain::span::SpanStatus::Ok => "ok",
+                            crate::domain::span::SpanStatus::Error => "error",
+                            crate::domain::span::SpanStatus::Timeout => "timeout",
+                        };
+                        let payload = serde_json::json!({
+                            "span_id": hex::encode(obs.span_id),
+                            "gen_ai_operation": obs.gen_ai_operation,
+                            "status": status_str,
+                            "start_time": obs.start_time,
+                            "model": obs.gen_ai_request_model,
+                        });
+                        pipe.publish(channel, payload.to_string());
+                    }
+                    if let Err(e) = pipe.query_async::<()>(&mut conn).await {
+                        warn!(error = %e, "writer: failed to publish live updates to Redis");
+                    }
+
                     // ACK all entries in the batch.
                     let ids: Vec<&str> = entry_ids.iter().map(|s| s.as_str()).collect();
                     if let Err(e) =
