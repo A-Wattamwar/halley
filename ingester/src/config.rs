@@ -29,6 +29,10 @@ pub struct Config {
     pub redis_url: String,
     /// gRPC bind address for the OTLP/gRPC receiver (e.g. `0.0.0.0:4317`).
     pub grpc_addr: SocketAddr,
+    /// Whether API key authentication is required (default: false for local dev).
+    pub auth_required: bool,
+    /// Postgres URL for api_keys lookup.
+    pub postgres_url: String,
 }
 
 #[derive(Debug, Error)]
@@ -77,6 +81,16 @@ impl Config {
         let clickhouse_password = std::env::var("CLICKHOUSE_PASSWORD")
             .map_err(|_| ConfigError::Missing("CLICKHOUSE_PASSWORD"))?;
 
+        let auth_required_raw =
+            std::env::var("HALLEY_AUTH_REQUIRED").unwrap_or_else(|_| "false".into());
+        let auth_required = match auth_required_raw.as_str() {
+            "true" | "1" => true,
+            _ => false, // Default to false (D-15)
+        };
+
+        let postgres_url = std::env::var("POSTGRES_URL")
+            .unwrap_or_else(|_| "postgresql://halley:halley@localhost:5432/halley".into());
+
         Ok(Self {
             http_addr,
             log_level,
@@ -92,6 +106,8 @@ impl Config {
                     reason: e.to_string(),
                 },
             )?,
+            auth_required,
+            postgres_url,
         })
     }
 }

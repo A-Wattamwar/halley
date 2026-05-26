@@ -41,6 +41,11 @@ export interface ListRunsParams {
   /** ISO timestamp upper bound (inclusive). Defaults to now. */
   toTime?: string;
   limit?: number;
+  /**
+   * UUID string of the project to filter by (from the session).
+   * When absent, no project filter is applied (dev bypass — D-15).
+   */
+  projectId?: string;
 }
 
 /**
@@ -57,6 +62,7 @@ export async function listRuns(
     fromTime = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
     toTime = new Date().toISOString(),
     limit = 200,
+    projectId,
   } = params;
 
   const client = getClickHouseClient();
@@ -98,11 +104,17 @@ export async function listRuns(
         FROM halley.observations
         WHERE start_time >= parseDateTimeBestEffort({fromTime: String})
           AND start_time <= parseDateTimeBestEffort({toTime: String})
+          ${projectId ? "AND project_id = toUUID({projectId: String})" : ""}
         GROUP BY run_id
         ORDER BY MIN(start_time) DESC
         LIMIT {limit: UInt32}
       `,
-      query_params: { fromTime, toTime, limit },
+      query_params: {
+        fromTime,
+        toTime,
+        limit,
+        ...(projectId ? { projectId } : {}),
+      },
       format: "JSONEachRow",
     });
 

@@ -66,8 +66,43 @@ pub async fn post_otlp_traces(
         });
     };
 
+    // Auth check
+    let mut project_id = state.auth.default_project_id();
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !auth_header.is_empty() {
+        if !auth_header.starts_with("Bearer hlly_") {
+            return Err(IngestError::Unauthorized(
+                "Missing or invalid Bearer token".into(),
+            ));
+        }
+
+        let token = auth_header.strip_prefix("Bearer ").unwrap();
+        match state.auth.validate_token(token).await {
+            Ok(Some(pid)) => project_id = pid,
+            Ok(None) => {
+                return Err(IngestError::Unauthorized(
+                    "Invalid or revoked API key".into(),
+                ))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Auth service error");
+                return Err(IngestError::Storage(
+                    "Authentication service unavailable".into(),
+                ));
+            }
+        }
+    } else if state.auth.is_auth_required() {
+        return Err(IngestError::Unauthorized(
+            "Missing or invalid Bearer token".into(),
+        ));
+    }
+
     let (accepted, errors) =
-        ingest_otlp_request(request, &state.normalizer, &state.publisher).await;
+        ingest_otlp_request(request, &state.normalizer, &state.publisher, project_id).await;
 
     tracing::info!(accepted, errors, "OTLP/HTTP traces processed");
 

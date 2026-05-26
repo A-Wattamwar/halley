@@ -62,6 +62,11 @@ chrono = { version = "0.4", features = ["serde"] }
 # See DECISIONS.md D26 for stream entry encoding rationale.
 redis = { version = "0.27", features = ["tokio-comp", "streams"] }
 
+# Postgres connection pool for API key validation (Phase 4 Day 4).
+tokio-postgres = { version = "0.7", features = ["with-uuid-1", "with-chrono-0_4"] }
+deadpool-postgres = { version = "0.14" }
+
+
 # Stream entry encoding: bincode v1 over postcard. See DECISIONS.md D26.
 bincode = "1"
 

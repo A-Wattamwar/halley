@@ -567,7 +567,7 @@ Docker Compose for self-hosters. Helm chart is a stretch for Phase 6.
 ## 8. Security and privacy
 
 - API keys stored as SHA-256 hashes in Postgres; shown once at creation.
-- OTLP ingress requires an API key in `Authorization: Bearer` header or gRPC metadata.
+- OTLP ingress requires an API key. For HTTP endpoints (`/v1/traces`, `/v1/spans/json`), pass the key in the `Authorization` header: `Authorization: Bearer hlly_...`. For gRPC endpoints, pass it in the `authorization` metadata field. In dev mode (`HALLEY_AUTH_REQUIRED=false`), this check is bypassed.
 - Dashboard auth via Auth.js, email+password with optional OAuth, Postgres adapter.
 - Single-org per deployment in v1. Multi-tenant is post-v1.
 - **Content redaction for cassettes**: configurable per project. Regex-based PII scrubber runs before body hashing when enabled. Redacted bodies are still deterministic (scrubbed-before-hash means the same scrubbed body hashes the same every time), so replay still works.

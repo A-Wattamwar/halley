@@ -38,15 +38,51 @@ pub struct Accepted {
 #[instrument(skip(state, raw), fields(trace_id = %raw.trace_id, span_id = %raw.span_id))]
 pub async fn post_span(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(raw): Json<RawSpan>,
 ) -> Result<(StatusCode, Json<Accepted>), IngestError> {
     let start = Instant::now();
 
-    // 1. Convert RawSpan → OtlpSpan (hex decode + attribute packing).
+    // 1. Auth check
+    let mut project_id = state.auth.default_project_id();
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !auth_header.is_empty() {
+        if !auth_header.starts_with("Bearer hlly_") {
+            return Err(IngestError::Unauthorized(
+                "Missing or invalid Bearer token".into(),
+            ));
+        }
+
+        let token = auth_header.strip_prefix("Bearer ").unwrap();
+        match state.auth.validate_token(token).await {
+            Ok(Some(pid)) => project_id = pid,
+            Ok(None) => {
+                return Err(IngestError::Unauthorized(
+                    "Invalid or revoked API key".into(),
+                ))
+            }
+            Err(e) => {
+                tracing::error!(error = %e, "Auth service error");
+                return Err(IngestError::Storage(
+                    "Authentication service unavailable".into(),
+                ));
+            }
+        }
+    } else if state.auth.is_auth_required() {
+        return Err(IngestError::Unauthorized(
+            "Missing or invalid Bearer token".into(),
+        ));
+    }
+
+    // 2. Convert RawSpan → OtlpSpan (hex decode + attribute packing).
     let otlp_span = raw_span_to_otlp(raw)?;
 
-    // 2. Normalize → CanonicalSpan.
-    let canonical =
+    // 3. Normalize → CanonicalSpan.
+    let mut canonical =
         state
             .normalizer
             .normalize(otlp_span)
@@ -55,10 +91,14 @@ pub async fn post_span(
                 reason: format!("normalize error: {e}"),
             })?;
 
+    // Phase 4 Day 4: Overwrite the project_id from the payload with the one
+    // resolved from the API key. This prevents project impersonation.
+    canonical.project_id = project_id;
+
     let dialect = canonical.source_dialect.clone();
     let unknown_attr_count = canonical.attributes.len() as u64;
 
-    // 3. Hash bodies → (ObservationRow, Vec<BodyRow>).
+    // 4. Hash bodies → (ObservationRow, Vec<BodyRow>).
     let (obs_row, body_rows) = canonical
         .into_rows()
         .map_err(|e| IngestError::Storage(format!("into_rows: {e}")))?;

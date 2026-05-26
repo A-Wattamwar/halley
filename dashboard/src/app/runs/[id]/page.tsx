@@ -20,6 +20,8 @@ import { getRunDetail, getSpanDetail, ROOT_PARENT_ID } from "@/lib/halley-query"
 import type { SpanSummary, SpanDetail } from "@/lib/halley-query";
 import { SpanInspector } from "./SpanInspector";
 import { SpanGraphWrapper } from "./SpanGraphWrapper";
+import { SpanBarLink } from "./SpanBarLink";
+import { getSessionProjectId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -136,18 +138,24 @@ interface PageProps {
 }
 
 export default async function RunDetailPage({ params, searchParams }: PageProps) {
-  const runId  = params.id.toUpperCase();
-  const detail = await getRunDetail(runId);
-  if (!detail) notFound();
+  const runId = params.id.toUpperCase();
 
-  const { run, spans } = detail;
+  // Phase 4 Day 3: single scoped call — returns null if the run doesn't exist
+  // OR doesn't belong to the session's project. Both cases → 404.
+  // This closes the Day 2 data-leak: the old double-fetch (unscoped first,
+  // scoped second) let unauthenticated callers confirm a run_id existed.
+  const projectId = await getSessionProjectId();
+  const scopedDetail = await getRunDetail(runId, projectId);
+  if (!scopedDetail) notFound();
+
+  const { run: scopedRun, spans: scopedSpans } = scopedDetail;
 
   // Fetch full span detail when ?span= is present (two extra ClickHouse queries).
   // null when no span is selected or the span_id doesn't exist.
   const selectedSpanHex = searchParams.span?.toUpperCase() ?? null;
   let spanDetail: SpanDetail | null = null;
   if (selectedSpanHex) {
-    spanDetail = await getSpanDetail(runId, selectedSpanHex);
+    spanDetail = await getSpanDetail(runId, selectedSpanHex, projectId);
   }
 
   // Tab: "timeline" (default) | "graph"
@@ -155,11 +163,11 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
   const spanQs   = selectedSpanHex ? `&span=${selectedSpanHex}` : "";
 
   // Timeline math
-  const runStartMs    = run.started_at ? new Date(run.started_at).getTime() : 0;
-  const runEndMs      = run.ended_at   ? new Date(run.ended_at).getTime()   : runStartMs;
+  const runStartMs    = scopedRun.started_at ? new Date(scopedRun.started_at).getTime() : 0;
+  const runEndMs      = scopedRun.ended_at   ? new Date(scopedRun.ended_at).getTime()   : runStartMs;
   const totalDuration = Math.max(1, runEndMs - runStartMs); // avoid /0
 
-  const depthMap        = buildDepthMap(spans);
+  const depthMap        = buildDepthMap(scopedSpans);
   const selectedSpanId  = (searchParams.span ?? "").toUpperCase();
 
   // Run header stats
@@ -181,9 +189,9 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
         <div className="mb-8">
           <div className="flex items-start gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-white">
-              {run.run_name || <span className="italic text-gray-500">Unnamed run</span>}
+              {scopedRun.run_name || <span className="italic text-gray-500">Unnamed run</span>}
             </h1>
-            {run.has_root && (
+            {scopedRun.has_root && (
               <span className="mt-1 inline-block px-2 py-0.5 rounded text-xs font-semibold bg-indigo-900 text-indigo-300 uppercase tracking-wide">
                 agent
               </span>
@@ -194,7 +202,7 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
           <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2 text-sm text-gray-400">
             <span>
               <span className="text-gray-600 mr-1.5">Started</span>
-              {formatTimestamp(run.started_at)}
+              {formatTimestamp(scopedRun.started_at)}
             </span>
             <span>
               <span className="text-gray-600 mr-1.5">Duration</span>
@@ -202,31 +210,31 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
             </span>
             <span>
               <span className="text-gray-600 mr-1.5">Spans</span>
-              <span className="text-gray-200">{run.span_count}</span>
+              <span className="text-gray-200">{scopedRun.span_count}</span>
             </span>
             <span>
               <span className="text-gray-600 mr-1.5">Tokens</span>
               <span className="text-gray-200">
-                {run.total_input_tokens.toLocaleString()} in
+                {scopedRun.total_input_tokens.toLocaleString()} in
                 {" / "}
-                {run.total_output_tokens.toLocaleString()} out
+                {scopedRun.total_output_tokens.toLocaleString()} out
               </span>
             </span>
             <span>
               <span className="text-gray-600 mr-1.5">Cost</span>
-              <span className={run.cost_dollars > 0 ? "text-emerald-400 font-medium" : "text-gray-600"}>
-                {run.cost_display}
+              <span className={scopedRun.cost_dollars > 0 ? "text-emerald-400 font-medium" : "text-gray-600"}>
+                {scopedRun.cost_display}
               </span>
             </span>
           </div>
 
           {/* Status + dialect badges */}
           <div className="mt-3 flex items-center gap-2">
-            <StatusBadge status={run.worst_status} />
-            <DialectBadge dialect={run.top_dialect} />
-            {run.top_model && (
+            <StatusBadge status={scopedRun.worst_status} />
+            <DialectBadge dialect={scopedRun.top_dialect} />
+            {scopedRun.top_model && (
               <span className="inline-block px-2 py-0.5 rounded text-xs font-mono bg-gray-800 text-gray-300">
-                {shortModel(run.top_model)}
+                {shortModel(scopedRun.top_model)}
               </span>
             )}
           </div>
@@ -253,7 +261,7 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
         {/* ── Graph view (stretch / Day 5) ── */}
         {view === "graph" && (
           <SpanGraphWrapper
-            spans={spans}
+            spans={scopedSpans}
             runId={runId}
             selectedSpanId={selectedSpanHex ?? ""}
             view={view}
@@ -270,7 +278,7 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
                 Timeline
               </h2>
               <span className="text-xs text-gray-500">
-                {spans.length} span{spans.length === 1 ? "" : "s"}
+                {scopedSpans.length} span{scopedSpans.length === 1 ? "" : "s"}
               </span>
             </div>
             <span className="text-xs text-gray-600 font-mono">
@@ -293,7 +301,7 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
 
           {/* Span rows */}
           <div className="divide-y divide-gray-800/40">
-            {spans.map((span) => {
+            {scopedSpans.map((span) => {
               const d = depthMap.get(span.span_id) ?? 0;
 
               const leftPct = ((span.start_time_ms - runStartMs) / totalDuration) * 100;
@@ -337,9 +345,10 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
                     )}
                   </div>
 
-                  {/* Bar area — absolute positioned Link */}
+                  {/* Bar area — SpanBarLink calls router.refresh() so the RSC
+                      re-fetches spanDetail when ?span= changes (inspector fix). */}
                   <div className="flex-1 relative h-7 min-w-0 px-2">
-                    <Link
+                    <SpanBarLink
                       href={`/runs/${runId}?span=${span.span_id}`}
                       title={`${barLabel} · ${formatDuration(span.duration_ms)}`}
                       className={[
@@ -359,7 +368,7 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
                       <span className={`text-[10px] font-medium truncate whitespace-nowrap ${colors.text}`}>
                         {formatDuration(span.duration_ms)}
                       </span>
-                    </Link>
+                    </SpanBarLink>
                   </div>
 
                   {/* Token counts */}
@@ -388,7 +397,7 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
               Click a span bar to open the inspector →
             </span>
             <span className="text-[11px] text-gray-600">
-              {run.started_at ? formatTimestamp(run.started_at) : ""}
+              {scopedRun.started_at ? formatTimestamp(scopedRun.started_at) : ""}
             </span>
           </div>
         </div>

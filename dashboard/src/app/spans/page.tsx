@@ -15,6 +15,7 @@
  */
 import { getClickHouseClient } from "@/lib/clickhouse";
 import Link from "next/link";
+import { getSessionProjectId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +33,7 @@ interface SpanRow {
   started_at: string;
 }
 
-async function getSpans(): Promise<SpanRow[]> {
+async function getSpans(projectId?: string): Promise<SpanRow[]> {
   const client = getClickHouseClient();
   try {
     const result = await client.query({
@@ -50,9 +51,11 @@ async function getSpans(): Promise<SpanRow[]> {
           status,
           formatDateTime(start_time, '%Y-%m-%d %H:%M:%S')     AS started_at
         FROM halley.observations
+        ${projectId ? "WHERE project_id = toUUID({projectId: String})" : ""}
         ORDER BY start_time DESC
         LIMIT 100
       `,
+      query_params: projectId ? { projectId } : {},
       format: "JSONEachRow",
     });
     return await result.json<SpanRow>();
@@ -62,7 +65,8 @@ async function getSpans(): Promise<SpanRow[]> {
 }
 
 export default async function SpansPage() {
-  const spans = await getSpans();
+  const projectId = await getSessionProjectId();
+  const spans = await getSpans(projectId);
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 p-8">

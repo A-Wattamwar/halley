@@ -36,6 +36,7 @@ pub struct AppState {
     pub publisher: Arc<Mutex<Publisher>>,
     pub normalizer: Arc<Normalizer>,
     pub metrics_handle: PrometheusHandle,
+    pub auth: Arc<crate::auth::AuthService>,
 }
 
 pub fn build_router(state: AppState) -> Router {

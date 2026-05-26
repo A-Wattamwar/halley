@@ -13,6 +13,7 @@ use tokio::sync::{watch, Mutex};
 use tracing::info;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
+mod auth;
 mod config;
 mod domain;
 mod errors;
@@ -24,6 +25,7 @@ mod storage;
 mod telemetry;
 
 use crate::{
+    auth::AuthService,
     config::Config,
     grpc::otlp::HalleyTraceService,
     http::{build_router, AppState},
@@ -102,6 +104,12 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
+    // --- Auth service ---
+    let auth_service = Arc::new(
+        AuthService::new(&cfg.redis_url, &cfg.postgres_url, cfg.auth_required)
+            .context("initialize auth service")?,
+    );
+
     // --- gRPC server (OTLP :4317) ---
 
     let grpc_normalizer = Arc::new(Normalizer::new());
@@ -114,6 +122,7 @@ async fn main() -> anyhow::Result<()> {
     let trace_service = HalleyTraceService {
         normalizer: grpc_normalizer,
         publisher: grpc_publisher,
+        auth: auth_service.clone(),
     };
 
     let grpc_addr = cfg.grpc_addr;
@@ -135,6 +144,7 @@ async fn main() -> anyhow::Result<()> {
         publisher: Arc::new(Mutex::new(publisher)),
         normalizer: Arc::new(Normalizer::new()),
         metrics_handle,
+        auth: auth_service,
     };
     let app = build_router(state);
 

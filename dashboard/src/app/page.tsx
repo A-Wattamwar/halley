@@ -21,6 +21,7 @@
 import Link from "next/link";
 import { listRuns } from "@/lib/halley-query";
 import type { RunSummary } from "@/lib/halley-query";
+import { getSessionProjectId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
 
@@ -77,7 +78,11 @@ export default async function RunsPage({ searchParams }: PageProps) {
 
   const { fromTime, label } = resolveTimeRange(range);
 
-  const runs = await listRuns({ fromTime, limit: 200 });
+  // Phase 4 Day 2: project-scoped queries. getSessionProjectId() respects
+  // HALLEY_AUTH_REQUIRED=false (D-15) without a DB round-trip.
+  const projectId = await getSessionProjectId();
+
+  const runs = await listRuns({ fromTime, limit: 200, projectId });
 
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
@@ -92,13 +97,22 @@ export default async function RunsPage({ searchParams }: PageProps) {
               : `${runs.length} run${runs.length === 1 ? "" : "s"} · ${label}`}
           </p>
         </div>
-        <Link
-          href="/spans"
-          className="text-xs text-gray-500 hover:text-gray-300 transition-colors pt-1"
-          title="Debug view: flat spans table"
-        >
-          Debug: spans →
-        </Link>
+        <div className="flex items-center gap-4">
+          <Link
+            href="/settings/keys"
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors pt-1"
+            title="API key management"
+          >
+            Settings →
+          </Link>
+          <Link
+            href="/spans"
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors pt-1"
+            title="Debug view: flat spans table"
+          >
+            Debug: spans →
+          </Link>
+        </div>
       </div>
 
       {/* ── Filter bar ── */}

@@ -9,6 +9,7 @@
 //! canonical rows for equivalent payloads.
 
 use crate::{
+    auth::AuthService,
     normalizer::Normalizer,
     pipeline::{ingest::ingest_otlp_request, publisher::Publisher},
 };
@@ -26,6 +27,7 @@ use tracing::info;
 pub struct HalleyTraceService {
     pub normalizer: Arc<Normalizer>,
     pub publisher: Arc<Mutex<Publisher>>,
+    pub auth: Arc<AuthService>,
 }
 
 #[tonic::async_trait]
@@ -35,9 +37,37 @@ impl TraceService for HalleyTraceService {
         request: Request<ExportTraceServiceRequest>,
     ) -> Result<Response<ExportTraceServiceResponse>, Status> {
         let start = Instant::now();
+
+        // 1. Auth check
+        let mut project_id = self.auth.default_project_id();
+        let auth_header = request
+            .metadata()
+            .get("authorization")
+            .and_then(|m| m.to_str().ok())
+            .unwrap_or("");
+
+        if !auth_header.is_empty() {
+            if !auth_header.starts_with("Bearer hlly_") {
+                return Err(Status::unauthenticated("Missing or invalid Bearer token"));
+            }
+
+            let token = auth_header.strip_prefix("Bearer ").unwrap();
+            match self.auth.validate_token(token).await {
+                Ok(Some(pid)) => project_id = pid,
+                Ok(None) => return Err(Status::unauthenticated("Invalid or revoked API key")),
+                Err(e) => {
+                    tracing::error!(error = %e, "Auth service error");
+                    return Err(Status::internal("Authentication service unavailable"));
+                }
+            }
+        } else if self.auth.is_auth_required() {
+            return Err(Status::unauthenticated("Missing or invalid Bearer token"));
+        }
+
         let req = request.into_inner();
 
-        let (accepted, errors) = ingest_otlp_request(req, &self.normalizer, &self.publisher).await;
+        let (accepted, errors) =
+            ingest_otlp_request(req, &self.normalizer, &self.publisher, project_id).await;
 
         info!(accepted, errors, "OTLP/gRPC traces processed");
 

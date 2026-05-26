@@ -29,6 +29,10 @@ pub enum IngestError {
     #[error("storage error: {0}")]
     Storage(String),
 
+    /// Missing or invalid API key.
+    #[error("unauthorized: {0}")]
+    Unauthorized(String),
+
     /// Day 3 stub for the spans endpoint until Day 6 implements it.
     #[error("not implemented")]
     NotImplemented,
@@ -47,6 +51,9 @@ impl IntoResponse for IngestError {
                 Json(json!({ "error": reason })),
             )
                 .into_response(),
+            IngestError::Unauthorized(reason) => {
+                (StatusCode::UNAUTHORIZED, Json(json!({ "error": reason }))).into_response()
+            }
             IngestError::NotImplemented => (
                 StatusCode::NOT_IMPLEMENTED,
                 Json(json!({ "error": "POST /v1/spans/json is implemented on Day 6" })),

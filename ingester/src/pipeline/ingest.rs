@@ -24,6 +24,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::warn;
 
+use uuid::Uuid;
+
 /// Process an `ExportTraceServiceRequest`: iterate all spans, normalize, hash, publish.
 ///
 /// Returns `(accepted, errors)` counts. Individual span errors are logged but
@@ -32,6 +34,7 @@ pub async fn ingest_otlp_request(
     request: ExportTraceServiceRequest,
     normalizer: &Arc<Normalizer>,
     publisher: &Arc<Mutex<Publisher>>,
+    project_id: Uuid,
 ) -> (u32, u32) {
     let mut accepted = 0u32;
     let mut errors = 0u32;
@@ -39,7 +42,7 @@ pub async fn ingest_otlp_request(
     for resource_spans in request.resource_spans {
         for scope_spans in resource_spans.scope_spans {
             for proto_span in scope_spans.spans {
-                match process_one_span(proto_span, normalizer, publisher).await {
+                match process_one_span(proto_span, normalizer, publisher, project_id).await {
                     Ok(()) => accepted += 1,
                     Err(e) => {
                         warn!(error = %e, "OTLP span processing failed");
@@ -63,10 +66,11 @@ async fn process_one_span(
     proto_span: ProtoSpan,
     normalizer: &Arc<Normalizer>,
     publisher: &Arc<Mutex<Publisher>>,
+    project_id: Uuid,
 ) -> Result<(), IngestError> {
     let otlp_span = proto_span_to_otlp(proto_span);
 
-    let canonical = normalizer.normalize(otlp_span).map_err(|e| match e {
+    let mut canonical = normalizer.normalize(otlp_span).map_err(|e| match e {
         NormalizeError::UnknownDialect => IngestError::InvalidField {
             field: "span",
             reason: "unknown dialect: no adapter matched".to_string(),
@@ -76,6 +80,10 @@ async fn process_one_span(
             reason: format!("normalize failed: {msg}"),
         },
     })?;
+
+    // Phase 4 Day 4: Overwrite the project_id from the payload with the one
+    // resolved from the API key. This prevents project impersonation.
+    canonical.project_id = project_id;
 
     // Emit metrics after successful normalization.
     let dialect = canonical.source_dialect.clone();
