@@ -9,14 +9,20 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "@auth/pg-adapter": "^1.11.2",
     "@clickhouse/client": "^1.18.5",
     "@dagrejs/dagre": "^3.0.0",
+    "@types/pg": "^8.20.0",
+    "bcryptjs": "^3.0.3",
     "next": "14.2.35",
+    "next-auth": "^4.24.14",
+    "pg": "^8.21.0",
     "react": "^18",
     "react-dom": "^18",
     "reactflow": "^11.11.4"
   },
   "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
     "@types/node": "^20",
     "@types/react": "^18",
     "@types/react-dom": "^18",

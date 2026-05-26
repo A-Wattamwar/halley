@@ -83,9 +83,14 @@ interface RawRow {
  *
  * Returns null when no spans are found (unknown run_id → 404 in the page).
  *
- * @param runId - 32-char uppercase hex string as returned by listRuns().
+ * @param runId     - 32-char uppercase hex string as returned by listRuns().
+ * @param projectId - Optional UUID string from the session. When provided,
+ *                    scopes the query to that project (D-15 bypass when absent).
  */
-export async function getRunDetail(runId: string): Promise<RunDetail | null> {
+export async function getRunDetail(
+  runId: string,
+  projectId?: string,
+): Promise<RunDetail | null> {
   // Fetch pricing first (its own client, closes itself — pricing.ts).
   const pricingMap = await fetchPricingMap();
 
@@ -111,9 +116,13 @@ export async function getRunDetail(runId: string): Promise<RunDetail | null> {
           attributes
         FROM halley.observations
         WHERE hex(run_id) = {runId: String}
+          ${projectId ? "AND project_id = toUUID({projectId: String})" : ""}
         ORDER BY start_time ASC
       `,
-      query_params: { runId: runId.toUpperCase() },
+      query_params: {
+        runId: runId.toUpperCase(),
+        ...(projectId ? { projectId } : {}),
+      },
       format: "JSONEachRow",
     });
 
@@ -295,12 +304,14 @@ interface RawObsRow {
  * Pitfall (#6 in plan): body_hash is raw bytes (FixedString(32)).
  * Use WHERE hex(body_hash) = {h} with uppercase hex from JS.
  *
- * @param runId  - 32-char uppercase hex (page URL params.id)
- * @param spanId - 16-char uppercase hex (URL ?span= query param)
+ * @param runId     - 32-char uppercase hex (page URL params.id)
+ * @param spanId    - 16-char uppercase hex (URL ?span= query param)
+ * @param projectId - Optional UUID string from the session (D-15 bypass when absent)
  */
 export async function getSpanDetail(
   runId: string,
-  spanId: string
+  spanId: string,
+  projectId?: string,
 ): Promise<SpanDetail | null> {
   const pricingMap = await fetchPricingMap();
   const client = getClickHouseClient();
@@ -340,11 +351,13 @@ export async function getSpanDetail(
         FROM halley.observations
         WHERE hex(run_id)  = {runId:  String}
           AND hex(span_id) = {spanId: String}
+          ${projectId ? "AND project_id = toUUID({projectId: String})" : ""}
         LIMIT 1
       `,
       query_params: {
         runId:  runId.toUpperCase(),
         spanId: spanId.toUpperCase(),
+        ...(projectId ? { projectId } : {}),
       },
       format: "JSONEachRow",
     });
