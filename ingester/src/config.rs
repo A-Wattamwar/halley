@@ -89,7 +89,7 @@ impl Config {
         };
 
         let postgres_url = std::env::var("POSTGRES_URL")
-            .unwrap_or_else(|_| "postgresql://halley:halley@localhost:5432/halley".into());
+            .unwrap_or_else(|_| "postgresql://halley:halley@localhost:5433/halley".into());
 
         Ok(Self {
             http_addr,

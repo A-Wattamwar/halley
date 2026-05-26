@@ -32,7 +32,7 @@ import { DEV_PROJECT_ID } from "@/lib/session";
 const pool = new Pool({
   connectionString:
     process.env.POSTGRES_URL ??
-    "postgresql://halley:halley@localhost:5432/halley",
+    "postgresql://halley:halley@localhost:5433/halley",
   max: 5,
 });
 
