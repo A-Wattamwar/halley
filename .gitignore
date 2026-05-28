@@ -58,6 +58,9 @@ volumes/
 coverage/
 .nyc_output/
 *.lcov
+test-results/
+playwright-report/
+.playwright/
 
 # ---------- Logs ----------
 logs/

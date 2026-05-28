@@ -21,6 +21,7 @@ import type { SpanSummary, SpanDetail } from "@/lib/halley-query";
 import { SpanInspector } from "./SpanInspector";
 import { SpanGraphWrapper } from "./SpanGraphWrapper";
 import { SpanBarLink } from "./SpanBarLink";
+import { LiveSpansIsland } from "./LiveSpansIsland";
 import { getSessionProjectId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -270,6 +271,7 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
 
         {/* ── Timeline card ── */}
         {view === "timeline" && (
+        <>
         <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
           {/* Card header */}
           <div className="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
@@ -401,12 +403,22 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
             </span>
           </div>
         </div>
+
+        {/* ── Live spans island — appends new spans arriving via SSE ── */}
+        <LiveSpansIsland
+          runId={runId}
+          initialSpanIds={scopedSpans.map((s) => s.span_id)}
+        />
+        </>
         )} {/* end timeline */}
 
     </div>
 
-    {/* Span inspector drawer — Client Component, Suspense required for useSearchParams */}
-    <Suspense fallback={null}>
+    {/* Span inspector drawer — Client Component, Suspense required for useSearchParams.
+        key forces remount when ?span= changes so the client component receives
+        fresh spanDetail props from the server re-render (belt-and-suspenders with
+        the push+refresh in SpanBarLink). */}
+    <Suspense key={selectedSpanHex ?? "none"} fallback={null}>
       <SpanInspector runId={runId} spanDetail={spanDetail} />
     </Suspense>
   </main>
