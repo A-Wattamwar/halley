@@ -151,10 +151,19 @@ services:
     container_name: halley-dashboard
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Inside the container, Postgres is reachable at the compose service
+      # name on its internal port (5432), NOT localhost:5433 (the host-mapped
+      # port). The code default (localhost:5433) is correct for `npm run dev`
+      # on the host but wrong in-container — this override fixes the Settings
+      # page and (once auth is enabled) login in the Docker stack.
+      POSTGRES_URL: "postgres://${POSTGRES_USER:-halley}:${POSTGRES_PASSWORD:-halley}@postgres:5432/${POSTGRES_DB:-halley}"
     ports:
       - "3000:3000"
     depends_on:
       clickhouse:
+        condition: service_healthy
+      postgres:
         condition: service_healthy
       ingester:
         condition: service_healthy

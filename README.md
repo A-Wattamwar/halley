@@ -199,13 +199,17 @@ Each quickstart is under 150 lines: prerequisites, install, setup snippet, verif
 
 **Runs list** — every agent run in one view with dialect, token counts, cost, and status at a glance.
 
-![Halley runs list — 4 runs including the reasoning-agent, hello-world, otel-genai, and openllmetry traces](docs/screenshots/runs-list.png)
+![Halley runs list — five gpt-4o-mini runs ingested via the otel-genai dialect, each showing spans, token counts, cost, and an ok status](docs/screenshots/runs-list.png)
 
-**Run detail with span inspector** — click any span bar to open the inspector. Here the CoT Verify span is selected, showing timing, identity fields (click to copy), model, usage, and the full input/output bodies as pretty-printed JSON.
+**Run detail with span inspector** — click any span bar to open the inspector, showing timing, identity fields (click to copy), model, usage, and the full input/output bodies as pretty-printed JSON.
 
-![Halley run detail page for the reasoning-agent run, with the span inspector open on the CoT verify span](docs/screenshots/run-detail-inspector.png)
+![Halley run detail page with the span inspector open on a gpt-4o-mini chat span, showing identity, model, usage, and the input/output bodies](docs/screenshots/run-detail-inspector.png)
 
 The graph view (Timeline | Graph tab) shows the same spans as a dagre-laid-out ReactFlow graph, with parent→child edges and the same operation-color palette.
+
+**API keys** — create, rotate, and revoke project-scoped ingest keys. Keys are prefixed `hlly_`, stored only as SHA-256 hashes, and shown in full exactly once at creation.
+
+![Halley API keys settings page showing the create-key form, an empty key list, and the ingester usage example](docs/screenshots/api-keys.png)
 
 ---
 
