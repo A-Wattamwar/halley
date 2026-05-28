@@ -5,20 +5,28 @@
 
 ---
 
-## The one decision to confirm before Day 1
+## Core decision (locked 2026-05-28): replay interception → D51
 
 **How does replay intercept the user's LLM and tool calls?**
 
-The CLI is a Rust binary (ROADMAP deliverable #4, ARCHITECTURE §3.8), but the user's agent is TypeScript or Python. A Rust binary cannot monkey-patch a Python `openai` client. The clean, language-agnostic mechanism:
+The CLI is a Rust binary (ROADMAP deliverable #4, ARCHITECTURE §3.8), but the user's agent is Python or TypeScript. Decision, after researching the May-2026 state of the art (`vcr-llm`, `pytest-agentcontract`, `agentsnap`, `llm-test-harness`):
 
-> **`halley ci` starts a local record/replay HTTP proxy and points the user's agent at it** (e.g. exports `OPENAI_BASE_URL=http://127.0.0.1:<port>`, configured in `halley.config.json`). On each provider call the proxy hashes the canonical request (D22 hashing rule — same as body capture), looks it up in the cassette: **hit → serve the recorded response (cost $0); miss → forward to the real provider, record the fresh response as a new cassette version.** Tool calls are intercepted the same way for tools the user routes through a configured HTTP endpoint; tools called in-process are matched by the SDK shim (Phase 6) or treated as live (with the tool-effect-safe guard).
+> **A thin per-language record/replay shim that patches the client/transport layer in-process** (e.g. `httpx`/`requests` in Python, `fetch`/`undici` in TS — the `vcr-llm` approach), **orchestrated by the Rust `halley` CLI**. The CLI sets the mode (record / replay / hybrid) and cassette path via env; the shim intercepts each provider and tool call, canonicalizes + hashes the request (**D22 hashing rule** — same as body capture), and matches against the cassette: **hit → serve the recorded response (cost $0); miss → call live, record a new cassette version.** One cassette format + one hash algorithm shared across languages so cassettes replay cross-language.
 
-This is the load-bearing design choice for the whole phase. It means:
-- The CLI stays Rust and language-agnostic. No per-language replay SDK in v1.
-- Cassette matching reuses the canonical-JSON hashing we already trust (D22).
-- "Pure" vs "hybrid" mode is just "did every request hit the cassette."
+**Why a shim and not a standalone HTTP proxy** (the research flipped this):
+- LLM requests all POST to the same URL, so URL-based proxy matching fails; you need turn-sequence + input-hash matching, which the in-process shim does naturally.
+- A naive proxy **loses SSE streaming frame boundaries** — breaking Halley's bit-fidelity claim. The shim records provider-aware.
+- A proxy **cannot see in-process tool calls** — which would gut Halley's "same tools, same order" *structural invariant*. The shim intercepts tools in-process.
+- Interception is **not** Halley's differentiator (portable in-repo fixtures + `bisect` + tool-effect-safe replay are). So pick the mechanism that protects those, not the one that's simplest to build.
 
-**If you disagree** (e.g. you'd rather ship a TS replay SDK that patches `fetch`), say so now — it reshapes Week 10 Days 2–3. My recommendation is the proxy: it's the only approach that works across Python, TS, and Vercel with one Rust binary, and it mirrors how `vcr`/`polly.js`/`nock` cassette tools work in practice. This becomes **D51** (proposed below) once you confirm.
+**Division of labor:** the Rust CLI owns everything language-agnostic — `ci`/`record`/`diff`/`bisect`, fixture format, cassette index, invariant evaluation, JUnit/exit codes, bisect orchestration. The shim is small (`vcr-llm` is "zero deps") and only does record/replay interception.
+
+**Build order (de-risks Week 10 for a solo founder):**
+- **Python shim first** — the flagship demo (`examples/reasoning-agent-python`) is Python, so the hero demo needs only one language working end-to-end.
+- **TS shim** reuses the `sdk-ts/` scaffold — late Week 10 if time allows, else Phase 6.
+- HTTP proxy documented as a fallback for languages without a shim.
+
+This is **D51** (recorded below).
 
 ---
 
@@ -36,7 +44,7 @@ This is the load-bearing design choice for the whole phase. It means:
 **Starting state (verified 2026-05-28):**
 - `worker/` — scaffold only (`README.md`, no code). Needs the BullMQ runtime built from scratch.
 - `cli/` — **does not exist.** Created in Week 10.
-- `sdk-ts/` — scaffold only. Stays out of scope (replay is proxy-based, not SDK-based, in v1).
+- `sdk-ts/` — scaffold only. Becomes the home of the TS replay shim (D51), but TS is second priority; Python shim ships first.
 - Postgres `fixtures` (`id, project_id, source_run_id, repo_path, invariants_json JSONB, status ∈ {proposing,ready,stale}, last_replay_at, created_at`) and `bisect_jobs` (`id, fixture_id, base_commit, head_commit, status ∈ {queued,running,done,failed}, result_commit, log, created_at, completed_at`) — **already exist from Phase 1.** No new tables expected; columns may need additive widening only.
 - ClickHouse `observation_body` (content-addressed, SHA-256, deduped) — **live since Phase 2.** Cassette bodies are already captured. Phase 5 reads them, it does not change capture.
 
@@ -55,7 +63,7 @@ This is the load-bearing design choice for the whole phase. It means:
 - GitHub App fixture writes — Phase 6 (local path only in Phase 5).
 - Semantic invariant runner (LLM-as-judge) — off by default, proposal-only; the runner itself is Phase 6.
 - Cassette side-by-side diff viewer — Phase 6.
-- TS/Python replay SDK — not needed given the proxy approach.
+- Full replay *SDK* (rich client wrappers, framework integrations) — out of scope; v1 ships a minimal record/replay *shim* per language (Python first), not a full SDK.
 
 ---
 
@@ -63,8 +71,8 @@ This is the load-bearing design choice for the whole phase. It means:
 
 ### New components
 1. **Worker runtime (`worker/`, Node.js + BullMQ).** New `docker-compose` service. Consumes jobs from Redis (BullMQ queue, separate from the `halley:spans` stream). Jobs: `invariant.infer`, `bisect.run`. Reads ClickHouse (observations + bodies) and writes Postgres (`fixtures.invariants_json`, `bisect_jobs`).
-2. **`halley` CLI (`cli/`, Rust, clap).** Host-side binary built with cargo (D-2 — no Docker). Subcommands `ci`, `record`, `diff`, `bisect`. Owns the replay proxy and cassette matcher.
-3. **Replay proxy (inside the CLI).** Local HTTP server that records/serves provider responses by canonical-request hash. The interception mechanism (see "the one decision" above).
+2. **`halley` CLI (`cli/`, Rust, clap).** Host-side binary built with cargo (D-2 — no Docker). Subcommands `ci`, `record`, `diff`, `bisect`. Owns the cassette format, matcher orchestration, invariant evaluation, JUnit/exit codes, and bisect. Drives the language shim via env (mode + cassette path).
+3. **Per-language replay shim (`sdk-ts/` for TS; a small Python package for Python).** Patches the client/transport layer in-process to record/replay provider + tool calls by canonical-request hash (D22). The interception mechanism (see D51 above). Python first; TS second.
 4. **Fixture writer.** Serializes a fixture to `halley/fixtures/<slug>.json` + content-addressed `bodies/` in the user's repo via a configured local path. Leaves the commit unpushed (ARCHITECTURE §5.3).
 5. **`halley.config.json`.** User-repo config: agent entry point/command, provider base-URL env var to override, tool HTTP endpoints, replay defaults.
 
@@ -143,31 +151,31 @@ Backend-and-dashboard week. The deliverable is: **click a run → get proposed i
 
 ## Week 10 — CLI, replay, bisect, GitHub Action, hero demo (July 15–21)
 
-The heavy, risky week. Rust CLI built host-side (D-2, cargo). This is where the proxy-replay design earns its keep.
+The heavy, risky week. Rust CLI built host-side (D-2, cargo) + the Python replay shim. This is where the shim-replay design (D51) earns its keep.
 
 ### Day 1: `cli/` scaffold + `halley record` + `halley.config.json`
 
 - Create `cli/` (Rust, clap, host-side). Subcommand stubs for `ci`, `record`, `diff`, `bisect`.
 - `halley record <run_id>`: authenticate to the backend (reuse `hlly_` key), pull the run's observations + bodies, write a local fixture using the **Week 9 Day 4 fixture format** (CLI and worker share one format).
-- Define + parse `halley.config.json` (agent run command, provider base-URL env var, tool endpoints, replay defaults).
+- Define + parse `halley.config.json` (agent run command, replay-mode env var the shim reads, tool config incl. `irreversible` flags, replay defaults).
 
 **Acceptance:**
 - `halley record <run_id>` writes a valid fixture identical in shape to the dashboard-written one.
 - `cargo build/clippy/fmt/test` clean.
 
-### Day 2: Replay engine (pure mode) + `halley ci` + JUnit XML
+### Day 2: Python replay shim + replay engine (pure mode) + `halley ci` + JUnit XML
 
-- Build the record/replay proxy: start local HTTP server, canonicalize+hash each request (D22), match against the cassette, serve recorded responses on hit.
-- `halley ci`: walk `halley/fixtures/`, for each fixture launch the configured agent command with the provider base URL pointed at the proxy, **pure mode** (all hits, $0), evaluate invariants against the resulting run, aggregate pass/fail.
+- Build the **Python replay shim**: patch the client/transport layer in-process, canonicalize+hash each provider/tool request (D22), match against the cassette, serve recorded responses on hit. Provider-aware so SSE bodies are recorded faithfully.
+- `halley ci`: walk `halley/fixtures/`, for each fixture launch the configured agent command with the shim active (mode + cassette path via env), **pure mode** (all hits, $0), evaluate invariants against the resulting run, aggregate pass/fail.
 - Exit code (0 / non-zero) + **JUnit XML** output for CI.
 
 **Acceptance:**
-- `halley ci` against an unchanged agent → all cassette hits, $0, all invariants pass, exit 0, JUnit XML emitted.
-- `cargo` clean.
+- `halley ci` against the unchanged Python example → all cassette hits, $0, all invariants pass, exit 0, JUnit XML emitted.
+- `cargo` clean; shim unit-tested.
 
 ### Day 3: Hybrid mode + tool-effect-safe replay + `halley diff`
 
-- **Hybrid mode**: on a cassette miss (prompt/model changed) call the real provider live, record the fresh response as a new cassette version alongside the old (for diffing). Cached tool responses still served from cassette. Report live-call count + cost (gpt-4o-mini, D-7).
+- **Hybrid mode**: on a cassette miss (prompt/model changed) the shim calls the real provider live, records the fresh response as a new cassette version alongside the old (for diffing). Cached tool responses still served from cassette. Report live-call count + cost (gpt-4o-mini, D-7).
 - **Tool-effect-safe replay**: tools marked `irreversible` in `halley.config.json` refuse to execute on a miss without an explicit `--allow-irreversible` override or a configured substitute. This is a correctness/safety guard, not optional.
 - `halley diff <fixture_id>`: prompt-text / model-id / tool-contract / output deltas between the recorded baseline and the current run.
 
@@ -203,7 +211,7 @@ The heavy, risky week. Rust CLI built host-side (D-2, cargo). This is where the 
 
 - **D-1 … D-15**: carry over.
 - **D-16**: The `halley` CLI is Rust, built and tested **host-side** with cargo. Never rebuild Docker to test the CLI.
-- **D-17**: Replay interception is via the **local HTTP proxy** (provider base-URL override). No per-language replay SDK in Phase 5. (Pending D51 confirmation.)
+- **D-17**: Replay interception is via a thin **per-language in-process shim** that patches the client/transport layer (Python first, TS second), driven by the Rust CLI. Shared cassette format + D22 hash across languages. HTTP proxy is a documented fallback only. See D51.
 - **D-18**: The worker is a new Node.js + BullMQ `docker-compose` service. BullMQ uses its own Redis keys; it does **not** touch `halley:spans` / `halley:writers` / `halley:live:*`.
 - **D-19**: Fixtures in dev are written to a **sample repo under `examples/`** (local path). No external/GitHub writes until Phase 6.
 - **D-20**: OpenAI budget unchanged — gpt-4o-mini only (D-7). Hybrid-replay live calls are bounded and cost-reported; keep cumulative dev spend well under the $1 escalation line.
@@ -223,7 +231,7 @@ Once shipped, these are locked (changing them breaks users' committed fixtures):
 
 | Risk | Mitigation |
 |------|------------|
-| Replay can't intercept the user's calls cleanly | The proxy + base-URL override is the v1 mechanism (D-17). If a provider/SDK ignores the base URL, document it and require the config to set it explicitly. |
+| Replay can't intercept the user's calls cleanly | Per-language in-process shim patches the client/transport layer (D-17, D51) — sees in-process tool calls and records SSE faithfully, unlike a proxy. Python shim first (flagship demo); proxy fallback documented for unsupported languages. |
 | Invariant inference produces noisy proposals | Structural/schema/metric are deterministic and tight; semantic is off by default; the user reviews every proposal before save (ROADMAP risk #3). |
 | Cassette matching brittle when prompts change | Hybrid is the default for PR replays; pure only when nothing drifted; cost of hybrid bounded and reported (ROADMAP risk #4). |
 | Bisect on non-monotonic / flaky regressions | Run each candidate commit 3× before judging; surface a "widen bounds" prompt on flaky invariants (ROADMAP risk #5). |
@@ -245,6 +253,10 @@ Once shipped, these are locked (changing them breaks users' committed fixtures):
 
 ---
 
-## Proposed decision to record on Day 1 (confirm first)
+## Decision to record on Day 1 (locked 2026-05-28)
 
-**D51. Replay interception via local HTTP proxy, not a per-language SDK.** `halley ci` starts a local record/replay proxy and points the user's agent at it via a provider base-URL override configured in `halley.config.json`. Requests are matched by canonical-JSON hash (D22). Hit → recorded response ($0); miss → live call, recorded as a new cassette version. Rationale: keeps the CLI a single language-agnostic Rust binary across Python/TS/Vercel, reuses the hashing we already trust, and mirrors proven cassette tooling (`vcr`, `nock`, `polly.js`). Tradeoff: in-process tool calls that don't go over HTTP aren't intercepted in v1 (covered by the tool-effect-safe guard + Phase 6 SDK shim).
+**D51. Replay interception via a thin per-language in-process shim, not an HTTP proxy.** The Rust `halley` CLI orchestrates replay but delegates interception to a small per-language shim that patches the client/transport layer (Python `httpx`/`requests` first, TS `fetch`/`undici` second — the `vcr-llm` approach). The shim canonicalizes + hashes each provider/tool request (D22), matches the cassette (hit → recorded response, $0; miss → live call recorded as a new version), and shares one cassette format + hash across languages.
+
+**Rationale (researched against the May-2026 state of the art):** the tools shipping this pattern (`vcr-llm`, `pytest-agentcontract`, `agentsnap`, `llm-test-harness`) all intercept in-process, because (1) LLM calls all POST to one URL so URL-based proxy matching fails, (2) a proxy loses SSE streaming frame boundaries — breaking bit-fidelity, and (3) a proxy can't see in-process tool calls — which would gut Halley's "same tools, same order" structural invariant. Interception is not Halley's differentiator (portable in-repo fixtures + `bisect` + tool-effect-safe replay are), so the mechanism is chosen to protect those.
+
+**Tradeoff:** a shim is per-language. Mitigated by shipping Python first (the flagship demo is Python), reusing `sdk-ts/` for TS, and documenting an HTTP-proxy fallback for languages without a shim. Superseded only if a future single-binary interception approach proves equal on streaming + in-process tools.
