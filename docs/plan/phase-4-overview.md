@@ -235,3 +235,50 @@ Before approving each Day:
 - [ ] `cargo test` / `clippy` clean (on Rust-change days)
 - [ ] No new dependencies not listed in this plan
 - [ ] DECISIONS.md extended (not new entry) for minor corrections
+
+---
+
+## Phase 4 Retro
+
+*Written Week 8 Day 5 (2026-05-28). Hygiene: all green.*
+
+### What shipped
+
+**Week 7 — Auth + API keys**
+- Auth.js 4 CredentialsProvider with a Postgres adapter (bcrypt, seeded dev user). All dashboard pages guarded via middleware; `HALLEY_AUTH_REQUIRED=false` bypass for local dev (D-15).
+- Project-scoped `halley-query` — every ClickHouse query now filters `WHERE project_id = …`, scoped to the session's project UUID (D-15 dev bypass returns a fixed UUID without hitting Postgres).
+- API Keys page (`/settings/keys`): CRUD UI, `hlly_` prefixed tokens, SHA-256 hash-only storage in Postgres (plain text never persisted — D48).
+- Ingester API key validation: single Postgres lookup on first use, then Redis 60 s TTL cache. Hot-path latency unchanged (D48, D-15).
+
+**Week 8 — Live span streaming + E2E**
+- SSE live span endpoint (`GET /api/runs/[id]/live`): dedicated ioredis subscriber per connection, relays Redis Pub/Sub `halley:live:<run_id>` to the browser. One-directional, App Router compatible, no WebSocket needed (D49).
+- `useLiveSpans` hook: accumulates live spans, exposes `connState` (`connecting | open | disconnected`), exponential backoff reconnect (1 s → 2 s → 4 s, capped 30 s), generationRef guard prevents overlapping reconnects.
+- `LiveSpansIsland`: pulsing green "Live" / grey "Disconnected" badge; `IntersectionObserver`-based toast ("N new spans") when scrolled out of the live section.
+- SSE heartbeat: initial `": connected\n\n"` frame flushes response headers immediately so `EventSource.onopen` fires on idle runs; 25 s keepalive comment holds connections through idle proxies.
+- Playwright E2E (`e2e/live-span.spec.ts`): posts a halley-raw span, polls `/?range=all` until the run row appears, clicks through to the run detail page, clicks a span bar, asserts the inspector opens with body content. Passes in **3.9 s** against the standalone Docker image.
+
+### Notable bugs caught and fixed
+
+**D50 — ClickHouse 24.8 analyzer alias shadowing (span inspector root cause)**
+The new ClickHouse query analyzer (enabled by default in 24.8) propagates SELECT aliases into WHERE clauses. Both queries in `getSpanDetail` aliased computed expressions with the same name as the source column — e.g. `hex(span_id) AS span_id` — causing `WHERE hex(span_id) = '…'` to double-encode the value and match nothing. Fixed by using table-qualified column references (`observations.span_id`, `observation_body.body_hash`) in WHERE. This also affects the observation_body body-lookup sub-query. The fix is a two-line change; the root cause is not the Next.js router cache (which was the original hypothesis).
+
+**Runs list "All time" applied a hidden 7-day floor.**
+`listRuns` defaulted `fromTime` to 7 days ago when no time bound was passed; `resolveTimeRange("all")` passed no bound but the query applied the default. Fixed by making the time bound truly optional.
+
+**SSE badge stuck on "Connecting…".**
+`ReadableStream.start()` only enqueued bytes on Redis messages, so on idle runs the browser's `EventSource` never received bytes and `onopen` never fired. Fixed with an immediate `": connected\n\n"` frame on stream start.
+
+### Debt carried forward (do not fix in Phase 5 without a plan entry)
+
+- **D44 — Single-span Traceloop 0.55+ traces / no agent-root grouping.** Traceloop ≥ 0.55 emits one span per OTLP export (no parent-child grouping). The runs list shows N rows instead of 1 aggregated run. Fixing requires detecting the "single-span run" pattern and grouping by a semantic key.
+- **D46 — Vercel outer-span token aggregation.** `ai.usage.*` attributes on Vercel AI SDK outer spans are not summed into the run totals; only `gen_ai_usage_*` canonical columns are aggregated. The dashboard understates token counts for Vercel AI traces.
+- **Reasoning-agent example app answer parsing.** The `examples/reasoning-agent-python` app produces blank or wrong answers due to response-parsing logic that does not match the o1/o3 response format. This is an app-level bug; it does not affect ingestion or the dashboard. Flag for Phase 6 demo polish.
+
+### Screenshots (to be captured manually by Ayush)
+
+Directory: `docs/screenshots/` (exists — two screenshots already present from Phase 3).
+
+Three expected additions for Phase 4:
+- `docs/screenshots/login.png` — the `/login` page (email + password form, dark theme)
+- `docs/screenshots/api-keys.png` — the `/settings/keys` page (key list, create/revoke UI)
+- `docs/screenshots/live-timeline.png` — the `/runs/[id]` run detail page with the "Live" pulsing badge and the span inspector open
