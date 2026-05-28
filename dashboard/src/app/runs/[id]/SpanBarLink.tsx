@@ -1,24 +1,24 @@
 "use client";
 
 /**
- * SpanBarLink — thin Client Component wrapper for the clickable span bar.
+ * SpanBarLink — clickable span bar that opens the inspector.
  *
- * WHY THIS EXISTS (Phase 4 Day 1 inspector fix):
- *   Next.js 14 router cache (RSC payload cache) serves stale payloads when
- *   only searchParams change on the same pathname. Clicking a span bar updates
- *   ?span=<hex> but the router cache intercepts the navigation and returns the
- *   cached Server Component payload where spanDetail is still null.
+ * WHY NOT <Link> (Phase 4 inspector fix):
+ *   Next.js 14 router cache can serve stale RSC payloads when only searchParams
+ *   change on the same pathname. Using <Link onClick={router.refresh()}> fires
+ *   refresh() BEFORE the Link navigation commits the new URL, so refresh() ends
+ *   up re-fetching the OLD URL (without ?span=) and spanDetail stays null.
  *
- *   Fix: call router.refresh() in the onClick handler. This invalidates the
- *   RSC cache for the current route and triggers a fresh server re-render,
- *   so page.tsx re-runs getSpanDetail() and spanDetail is populated.
+ *   Fix: use router.push() + router.refresh() called synchronously. Both are
+ *   queued in the same render cycle; the App Router processes push first (URL
+ *   changes to the new ?span=), then refresh re-fetches that new URL so
+ *   page.tsx re-runs getSpanDetail() with the correct span ID.
  *
- *   NOT an API route — the data still flows through getSpanDetail() in
- *   halley-query/ (D-12). The Link href and all other behaviour are unchanged.
+ *   Data still flows through getSpanDetail() in halley-query/ — no API route.
  */
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTransition } from "react";
 
 interface Props {
   href:      string;
@@ -30,16 +30,23 @@ interface Props {
 
 export function SpanBarLink({ href, title, className, style, children }: Props) {
   const router = useRouter();
+  const [isPending, startTransition] = useTransition();
 
   return (
-    <Link
+    <a
       href={href}
       title={title}
-      className={className}
+      className={[className, isPending ? "opacity-70" : ""].filter(Boolean).join(" ")}
       style={style}
-      onClick={() => router.refresh()}
+      onClick={(e) => {
+        e.preventDefault();
+        startTransition(() => {
+          router.push(href, { scroll: false });
+          router.refresh();
+        });
+      }}
     >
       {children}
-    </Link>
+    </a>
   );
 }

@@ -29,13 +29,19 @@ This is what makes Halley different from Langfuse, Laminar, LangSmith, Phoenix, 
 - Rust toolchain pinned at 1.85
 - No proprietary SDK — users point any OTLP-emitting app at Halley
 
-# What has been built (as of Phase 3 Week 5 end)
+# What has been built (as of Phase 4 Week 7 end; Week 8 Day 1 committed, pending review)
 
-Phase 1 (Weeks 1-2): Full infrastructure. ClickHouse + Postgres + Redis + Rust ingester + Next.js dashboard placeholder. `docker compose up` brings everything healthy. `make smoke` passes 20/20 assertions.
+Phase 1 (Weeks 1-2): Full infrastructure. ClickHouse + Postgres + Redis + Rust ingester + Next.js dashboard placeholder. `docker compose up` brings everything healthy. `make smoke` passes 20/20 assertions. dbmate migrations for both ClickHouse and Postgres (D24).
 
 Phase 2 (Weeks 3-4): Production-quality ingester. OTLP/HTTP + OTLP/gRPC receivers. Five-dialect normalizer (halley-raw, openllmetry, openinference, vercel-ai, otel-genai) with property-based tests. Redis Streams pipeline with retry-forever-on-transient, DLQ-on-permanent classification. Write-time run grouping (`is_run_root` boolean). Prometheus metrics on `/metrics`. Sustained 4,792 spans/sec load test with 0% error rate.
 
 Phase 3 Week 5: Three real-world example apps emitting real OpenAI traces into Halley (Python Reasoning Agent via Traceloop/otel-genai, Vercel AI SDK app via vercel-ai, TypeScript+OpenInference via openinference). Three quickstart docs. Real OpenAI pricing loaded. Total OpenAI cost: $0.000074.
+
+Phase 3 Week 6: Dashboard became usable. Runs list (paginated, project-scoped) + run detail with timeline view, span inspector (identity/timing/model/usage + pretty-printed input/output bodies), and a dagre-laid-out ReactFlow graph (Timeline | Graph tabs). The flat spans table moved to `/spans` as a debug view (D45-D47). Known bug carried into Phase 4: span inspector router-cache staleness on `?span=` changes.
+
+Phase 4 Week 7: Auth + API keys. Auth.js CredentialsProvider (email+password) with Postgres adapter, `/login` page, route-protecting middleware. Session-aware, project-scoped `halley-query` functions. API keys management page (`/settings/keys`: create/rotate/revoke). Ingester API-key validation: `Authorization: Bearer hlly_...`, SHA-256 hash-only storage, `hlly_` prefix for identification + secret-scanning, Redis 60s-TTL cache on the hot path, `HALLEY_AUTH_REQUIRED=false` dev bypass (D48). Only Rust change in the phase.
+
+Phase 4 Week 8 Day 1 (committed `35fd180`, NOT yet reviewed/approved by us): fire-and-forget Redis Pub/Sub publisher in `ingester/src/pipeline/writer.rs` — after a successful ClickHouse insert, publishes minimal JSON (`span_id`, `gen_ai_operation`, `status`, `start_time`, `model`) to `halley:live:<hex_run_id>`. Local `pubsub_output.log` showed a captured `pmessage`, so it was at least manually verified once. Not docker-rebuilt/cargo-tested under our review. Treat as in-flight, not done.
 
 # Critical documents to read
 

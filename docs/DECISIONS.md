@@ -1042,3 +1042,63 @@ regardless of which `?view=` is active — no changes to the inspector were need
 3.  **Redis Cache with 60s TTL**: Querying Postgres on every single telemetry span/trace would bottleneck the ingester under load. Instead, the ingester checks Redis for `hlly_key_hash:<hash>`. On a cache miss, it queries Postgres and sets the Redis key with an `EX 60` (60 seconds) TTL.
     *   *Tradeoff*: If a key is revoked in the dashboard, it may remain valid in the ingester for up to 60 seconds until the Redis TTL expires. This is an acceptable tradeoff for the massive performance gain of avoiding database lookups on the hot path.
 4.  **Dev-Mode Bypass (`HALLEY_AUTH_REQUIRED=false`)**: By default in local development, the ingester bypasses auth and assigns all spans to the `DEV_PROJECT_ID`. This preserves the zero-config "it just works" experience for local testing, while allowing production deployments to enforce strict auth by flipping the env var to `true`.
+
+---
+
+## 2026-05-28 — Phase 4 Week 8 Day 2
+
+### D49. SSE over WebSocket for live span updates
+
+**Decision:** The live span update channel (`GET /api/runs/[id]/live`) is implemented as Server-Sent Events (SSE) over a `ReadableStream`, not WebSockets.
+
+**Constraints that ruled out WebSockets:**
+
+Next.js 14 App Router route handlers (`app/api/*/route.ts`) are standard Web Fetch API handlers that return `Response` objects. The Node.js `http.Server` upgrade event required for WebSocket handshakes is not surfaced through the App Router's request pipeline — there is no documented, supported way to upgrade an App Router route to a WebSocket connection. The Phase 4 plan's risk register acknowledged this ("WebSocket in Next.js API routes is limited") and listed a standalone Node WS server on port 4319 as a fallback. That standalone server would require its own Dockerfile layer, inter-process coordination, and CORS configuration, adding meaningful operational complexity for a communication channel that is server→client only.
+
+**Why SSE is the correct fit:**
+
+The live span channel is unidirectional: the server pushes new span events to the browser; the browser never sends data back over this channel. SSE (the `EventSource` browser API backed by `text/event-stream` responses) is purpose-built for exactly this pattern. A `ReadableStream` returned from a Next.js route handler with `Content-Type: text/event-stream` works natively in the App Router and is in-process — no extra server, no port, no proxy configuration.
+
+Required response headers:
+- `Content-Type: text/event-stream` — identifies the SSE protocol.
+- `Cache-Control: no-cache, no-transform` — prevents any intermediary from buffering the stream.
+- `Connection: keep-alive` — keeps the underlying TCP connection open.
+- `X-Accel-Buffering: no` — disables nginx proxy buffering (critical for Docker + reverse proxy deployments).
+
+`EventSource` provides built-in auto-reconnect with a configurable retry interval, which is sufficient for Day 2. Exponential backoff and a visual reconnection indicator are Day 3 work.
+
+**Implementation:** Each SSE connection creates a dedicated `ioredis` connection that subscribes to `halley:live:<run_id>`. On each Redis message, the handler enqueues an SSE frame (`data: <raw json>\n\n`) into the `ReadableStream`. On `request.signal` abort (browser disconnect or navigation away), the handler unsubscribes and calls `quit()` on the ioredis connection before closing the controller. No connections are leaked.
+
+**Known v1 scaling tradeoff — one Redis subscriber per SSE connection:**
+
+This is a deliberate limitation, not an oversight. Each open SSE connection holds one dedicated Redis subscriber connection. For Halley's self-hosted, single-organisation v1 use case — where the typical concurrent viewer count is 1–5 people watching the same run — this is entirely acceptable. Redis supports thousands of subscriber connections and the overhead per connection is negligible at this scale.
+
+The known ceiling: if many users simultaneously watch the same run (fan-out scenario), each holds their own subscriber on the same channel, causing the Redis server to emit N copies of every published message (one per subscriber). The fix is a shared in-process subscriber per channel with a registry of active `ReadableStreamDefaultController` instances — one Redis message fan-fanned to N controllers in memory. This is straightforward to build but adds state-management complexity that is not justified for v1 single-org self-hosted deployments. When Halley supports multi-org SaaS with concurrent viewers, this is the correct upgrade path and the change is contained to the SSE route handler.
+
+---
+
+## 2026-05-28 — Phase 4 Week 8 Day 4
+
+### D50. Table-qualify WHERE-clause columns (ClickHouse 24.8 analyzer alias shadowing)
+
+ClickHouse 24.8 enables the new query analyzer by default, which propagates
+SELECT-list aliases into the WHERE clause. A query that names a computed alias
+the same as the underlying column — e.g.
+`SELECT hex(span_id) AS span_id ... WHERE hex(span_id) = {spanId:String}` —
+now resolves the `span_id` inside WHERE to the *alias* (the already-hex string),
+yielding `hex(<hex_string>)`, which can never match the raw-bytes column. The
+symptom is silent: the query returns zero rows with no error.
+
+**This was the real root cause of the span-inspector "won't open" bug** —
+`getSpanDetail()` returned null because its WHERE never matched. It was NOT the
+Next.js router cache that the Day 3 work assumed; that is why reseeding with
+fresh, valid data did not fix it. The Day 3 `SpanBarLink` push/refresh +
+`Suspense key` changes were treating a symptom; they are harmless and left in
+place.
+
+**Rule:** in `dashboard/src/lib/halley-query/`, any WHERE/HAVING predicate that
+references a column which also appears aliased in the SELECT must use the
+table-qualified name (`hex(observations.span_id)`,
+`hex(observation_body.body_hash)`). Table-qualified references bypass alias
+resolution and bind to the raw column. Fixed in `halley-query/detail.ts`
+(two WHERE clauses). Applies to every future query module under `halley-query/`.

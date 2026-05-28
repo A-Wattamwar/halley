@@ -349,8 +349,8 @@ export async function getSpanDetail(
           ifNull(hex(tool_output_hash), '')                   AS tool_output_hash,
           attributes
         FROM halley.observations
-        WHERE hex(run_id)  = {runId:  String}
-          AND hex(span_id) = {spanId: String}
+        WHERE hex(observations.run_id)  = {runId:  String}
+          AND hex(observations.span_id) = {spanId: String}
           ${projectId ? "AND project_id = toUUID({projectId: String})" : ""}
         LIMIT 1
       `,
@@ -392,7 +392,7 @@ export async function getSpanDetail(
         query: `
           SELECT hex(body_hash) AS body_hash, body
           FROM halley.observation_body
-          WHERE hex(body_hash) IN ({h0: String}, {h1: String}, {h2: String}, {h3: String})
+          WHERE hex(observation_body.body_hash) IN ({h0: String}, {h1: String}, {h2: String}, {h3: String})
         `,
         // Slots beyond hashes.length get '' — never matches a real hash.
         query_params: {

@@ -58,12 +58,10 @@ export interface ListRunsParams {
 export async function listRuns(
   params: ListRunsParams = {}
 ): Promise<RunSummary[]> {
-  const {
-    fromTime = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString(),
-    toTime = new Date().toISOString(),
-    limit = 200,
-    projectId,
-  } = params;
+  // No silent time defaults: an absent bound means "unbounded" so the
+  // page's "All time" range (which passes no fromTime/toTime) truly queries
+  // all history. The page supplies explicit bounds for 1h / 24h / 7d.
+  const { fromTime, toTime, limit = 200, projectId } = params;
 
   const client = getClickHouseClient();
 
@@ -86,6 +84,25 @@ export async function listRuns(
     worst_status: string;
   }
 
+  // Build the WHERE clause from only the filters that are actually present.
+  // An absent fromTime/toTime means no bound on that side (true "all time").
+  const conditions: string[] = [];
+  const queryParams: Record<string, unknown> = { limit };
+  if (fromTime) {
+    conditions.push("start_time >= parseDateTimeBestEffort({fromTime: String})");
+    queryParams.fromTime = fromTime;
+  }
+  if (toTime) {
+    conditions.push("start_time <= parseDateTimeBestEffort({toTime: String})");
+    queryParams.toTime = toTime;
+  }
+  if (projectId) {
+    conditions.push("project_id = toUUID({projectId: String})");
+    queryParams.projectId = projectId;
+  }
+  const whereClause =
+    conditions.length > 0 ? `WHERE ${conditions.join("\n          AND ")}` : "";
+
   try {
     const result = await client.query({
       query: `
@@ -102,19 +119,12 @@ export async function listRuns(
           MAX(if(is_run_root, 1, 0))                        AS has_root,
           MAX(status)                                       AS worst_status
         FROM halley.observations
-        WHERE start_time >= parseDateTimeBestEffort({fromTime: String})
-          AND start_time <= parseDateTimeBestEffort({toTime: String})
-          ${projectId ? "AND project_id = toUUID({projectId: String})" : ""}
+        ${whereClause}
         GROUP BY run_id
         ORDER BY MIN(start_time) DESC
         LIMIT {limit: UInt32}
       `,
-      query_params: {
-        fromTime,
-        toTime,
-        limit,
-        ...(projectId ? { projectId } : {}),
-      },
+      query_params: queryParams,
       format: "JSONEachRow",
     });
 
