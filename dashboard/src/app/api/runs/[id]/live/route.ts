@@ -34,7 +34,7 @@ export async function GET(
 ) {
   const channel = `halley:live:${params.id.toLowerCase()}`;
 
-  const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6379/0";
+  const redisUrl = process.env.REDIS_URL ?? "redis://localhost:6380/0";
 
   // Dedicated subscriber connection — ioredis subscriber connections cannot
   // be used for other commands while subscribed, so we create one per SSE
