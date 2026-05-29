@@ -47,7 +47,7 @@ let _queue: Queue | null = null;
 function getQueue(): Queue {
   if (!_queue) {
     const redisOpts = parseRedisUrl(
-      process.env.REDIS_URL ?? "redis://localhost:6379/0"
+      process.env.REDIS_URL ?? "redis://localhost:6380/0"
     );
     _queue = new Queue(QUEUE_NAME, {
       connection: {

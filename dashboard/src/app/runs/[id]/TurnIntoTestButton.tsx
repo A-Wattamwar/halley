@@ -7,26 +7,27 @@
  * client island. Clicking POSTs to /api/fixtures, which inserts the fixture row
  * and enqueues the invariant.infer job.
  *
- * Success state: a link to the run page (invariant editor is Day 3; no
- * separate page exists today). An inline confirmation message is shown instead.
+ * On success, redirects to /fixtures/[id]/edit so the user can immediately
+ * review and edit the inferred invariants (Day 3 editor).
  *
  * The button is idempotent — the server returns the existing fixture_id if a
  * fixture was already created for this run.
  */
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 
 interface Props {
   runId:   string;
   runName: string;
 }
 
-type State = "idle" | "loading" | "done" | "error";
+type State = "idle" | "loading" | "error";
 
 export function TurnIntoTestButton({ runId, runName }: Props) {
-  const [state, setState]         = useState<State>("idle");
-  const [fixtureId, setFixtureId] = useState<string | null>(null);
-  const [errorMsg, setErrorMsg]   = useState<string>("");
+  const router = useRouter();
+  const [state, setState]       = useState<State>("idle");
+  const [errorMsg, setErrorMsg] = useState<string>("");
 
   async function handleClick() {
     setState("loading");
@@ -40,24 +41,12 @@ export function TurnIntoTestButton({ runId, runName }: Props) {
       if (!res.ok || !json.fixture_id) {
         throw new Error(json.error ?? `HTTP ${res.status}`);
       }
-      setFixtureId(json.fixture_id);
-      setState("done");
+      // Redirect to editor — Day 3.
+      router.push(`/fixtures/${json.fixture_id}/edit`);
     } catch (err) {
       setErrorMsg((err as Error).message);
       setState("error");
     }
-  }
-
-  if (state === "done") {
-    return (
-      <span className="inline-flex items-center gap-2 text-sm text-green-400">
-        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-          <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-        </svg>
-        Test created
-        <span className="text-xs text-gray-500 font-mono">{fixtureId?.slice(0, 8)}…</span>
-      </span>
-    );
   }
 
   if (state === "error") {

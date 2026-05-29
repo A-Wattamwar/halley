@@ -33,7 +33,7 @@ let _redis: Redis | null = null;
 
 export function getRedis(): Redis {
   if (!_redis) {
-    _redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379/0", {
+    _redis = new Redis(process.env.REDIS_URL ?? "redis://localhost:6380/0", {
       // Prevent ioredis from hanging the process after graceful shutdown.
       enableReadyCheck: true,
       maxRetriesPerRequest: null, // Required by BullMQ.
