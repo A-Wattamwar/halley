@@ -16,6 +16,7 @@ import pg from "pg";
 import { getSessionProjectId } from "@/lib/session";
 import { InvariantEditor } from "./InvariantEditor";
 import type { InvariantsJson } from "./InvariantEditor";
+import { BisectPanel } from "./BisectPanel";
 
 export const dynamic = "force-dynamic";
 
@@ -171,6 +172,16 @@ export default async function FixtureEditPage({ params }: PageProps) {
             fixtureId={fixture.id}
             initialInvariants={invariants!}
           />
+        )}
+
+        {/* Bisect panel — always visible once the fixture has a repo_path */}
+        {fixture.repo_path && (
+          <div className="mt-8">
+            <BisectPanel
+              fixtureId={fixture.id}
+              fixturePath={fixture.repo_path}
+            />
+          </div>
         )}
       </div>
     </main>

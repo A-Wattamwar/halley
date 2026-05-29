@@ -75,14 +75,26 @@ class Cassette:
         return self.observations[obs_index]
 
     def load_body(self, body_ref: str | None) -> Any:
-        """Load a body file by its ref path."""
+        """Load a body file by its ref path.
+
+        Handles two ref styles produced by different writers:
+          - Short form (shim recorder): "bodies/sha256-<h>.json"
+            → resolved relative to <fixtures_dir>/<slug>/
+          - Long form (worker, tests):  "halley/fixtures/<slug>/bodies/sha256-<h>.json"
+            → resolved by stripping "halley/fixtures/" prefix and joining to fixtures_dir
+        """
         if not body_ref:
             return None
         ref_path = Path(body_ref)
-        candidates = [
-            self._fixture_dir / ref_path.relative_to("halley/fixtures") if str(ref_path).startswith("halley/fixtures") else None,
-            self._fixture_dir.parent.parent / ref_path,
-            Path(body_ref),
+        slug_dir = self._fixture_dir / self.slug
+        candidates: list[Path] = [
+            # Long form: strip the "halley/fixtures/" repo-root prefix.
+            self._fixture_dir / ref_path.relative_to("halley/fixtures")
+            if str(ref_path).startswith("halley/fixtures")
+            else None,  # type: ignore[arg-type]
+            slug_dir / ref_path,       # short form: <fixtures_dir>/<slug>/bodies/…
+            self._fixture_dir / ref_path,  # fallback
+            Path(body_ref),            # absolute path
         ]
         for bp in candidates:
             if bp is not None and bp.exists():
