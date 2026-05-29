@@ -34,6 +34,10 @@ pub struct AgentConfig {
     /// Working directory for the agent command (relative to config file).
     #[serde(default)]
     pub cwd: Option<String>,
+
+    /// Slug for the recorded fixture (default: derived from run_id).
+    #[serde(default)]
+    pub fixture_slug: Option<String>,
 }
 
 #[allow(dead_code)]

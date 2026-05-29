@@ -339,3 +339,32 @@ non-bit-faithful (D53).
 If this needs fixing in a future version, the solution is to normalize
 float exponent format in the Python canonicalizer to match Rust's output
 (strip the `+` sign and leading zeros from exponents).
+
+### Tool-effect-safe replay: in-process tool limitation
+
+The Python shim intercepts HTTP calls at the `httpx.Client.send` level. This
+means:
+
+- **HTTP-visible tools**: Tools whose invocation goes through an HTTP call
+  intercepted by the shim (e.g., an OpenAI chat.completions request that
+  includes a `tools` parameter with function definitions) **are guarded**. If
+  the call misses the cassette in hybrid mode and the tool is marked
+  `irreversible: true` in `halley.config.json`, the shim refuses the live
+  call with exit code 79 and a clear error message.
+
+- **In-process Python function tools**: Tools implemented as regular Python
+  functions that are called directly by the agent (not through an HTTP
+  provider call) are **NOT intercepted** by the shim in v1. Their side effects
+  happen regardless of the replay mode. This is a fundamental constraint of
+  the httpx-layer interception approach — the shim has no visibility into
+  direct Python function calls.
+
+**Implication**: If an agent implements tool execution in-process (calling a
+Python function directly rather than delegating to a provider that calls back
+via HTTP), the irreversible guard cannot protect against those side effects.
+The guard only applies to tools whose `tools` parameter appears in an
+intercepted OpenAI API request body.
+
+This limitation is tracked for Phase 6. The correct fix is a higher-level
+interception point (e.g., wrapping the agent's `tool_call` dispatch method)
+or an explicit "dry-run" mode in the tool registry.

@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from halley_sdk.canonical import canonical_hash
+from halley_sdk.schema_inference import infer_invariants
 
 
 def write_fixture(
@@ -78,7 +79,7 @@ def write_fixture(
         ),
         "written_at": datetime.now(timezone.utc).isoformat(),
         "observations": obs_list,
-        "invariants": {},
+        "invariants": infer_invariants(observations),
         "replay_matching": {
             "strategy": "input_body_hash_v1",
             "description": (

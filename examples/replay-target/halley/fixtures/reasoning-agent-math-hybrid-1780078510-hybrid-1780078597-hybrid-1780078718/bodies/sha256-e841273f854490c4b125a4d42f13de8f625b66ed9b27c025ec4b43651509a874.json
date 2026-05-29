@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Reply YES or NO only."
+    },
+    {
+      "role": "user",
+      "content": "Is this answer correct? Answer YES or NO only.\nQuestion: Is 42 the answer to life?\nAnswer: 42 is a humorous reference to the search for meaning in life, but it is not a definitive answer."
+    }
+  ],
+  "model": "gpt-4o-mini",
+  "max_tokens": 1024,
+  "temperature": 0.0
+}

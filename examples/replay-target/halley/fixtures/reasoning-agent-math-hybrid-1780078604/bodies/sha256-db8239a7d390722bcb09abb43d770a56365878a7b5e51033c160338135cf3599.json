@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Give only the final answer. No explanation."
+    },
+    {
+      "role": "user",
+      "content": "Is 42 the answer to life, the universe, and everything?"
+    }
+  ],
+  "model": "gpt-4o-mini",
+  "max_tokens": 1024,
+  "temperature": 0.3
+}

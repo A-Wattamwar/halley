@@ -7,6 +7,8 @@ Semantic invariants are skipped (disabled in v1).
 
 from typing import Any
 
+from halley_sdk.schema_inference import collect_key_paths
+
 
 class InvariantResult:
     """Result of evaluating a single invariant."""
@@ -183,10 +185,15 @@ def _eval_schema(schema: dict, served: list[dict]) -> list[InvariantResult]:
         if output_body is None:
             output_body = {}
 
+        # Flatten the actual output body using the same collect_key_paths
+        # algorithm used during recording — ensures path format matches.
+        actual_key_paths: dict[str, str] = {}
+        collect_key_paths(output_body, "", actual_key_paths)
+
         # Check required_keys.
         required_keys = spec.get("required_keys", [])
-        if required_keys and isinstance(output_body, dict):
-            missing = [k for k in required_keys if k not in _flatten_keys(output_body)]
+        if required_keys:
+            missing = [k for k in required_keys if k not in actual_key_paths]
             ok = len(missing) == 0
             results.append(InvariantResult(
                 f"schema.span[{i}].required_keys",
@@ -196,11 +203,10 @@ def _eval_schema(schema: dict, served: list[dict]) -> list[InvariantResult]:
 
         # Check key_types.
         key_types = spec.get("key_types", {})
-        if key_types and isinstance(output_body, dict):
-            flat = _flatten_key_types(output_body)
+        if key_types:
             mismatches = []
             for key_path, expected_type in key_types.items():
-                actual_type = flat.get(key_path)
+                actual_type = actual_key_paths.get(key_path)
                 if actual_type is not None and actual_type != expected_type:
                     mismatches.append(f"{key_path}: expected {expected_type}, got {actual_type}")
             ok = len(mismatches) == 0
@@ -216,41 +222,3 @@ def _eval_schema(schema: dict, served: list[dict]) -> list[InvariantResult]:
 def _is_subsequence(sub: list, full: list) -> bool:
     it = iter(full)
     return all(item in it for item in sub)
-
-
-def _flatten_keys(obj: dict, prefix: str = "") -> set[str]:
-    keys = set()
-    for k, v in obj.items():
-        path = f"{prefix}.{k}" if prefix else k
-        keys.add(path)
-        if isinstance(v, dict):
-            keys.update(_flatten_keys(v, path))
-    return keys
-
-
-def _json_type(v: Any) -> str:
-    if v is None:
-        return "null"
-    if isinstance(v, bool):
-        return "boolean"
-    if isinstance(v, int):
-        return "number"
-    if isinstance(v, float):
-        return "number"
-    if isinstance(v, str):
-        return "string"
-    if isinstance(v, list):
-        return "array"
-    if isinstance(v, dict):
-        return "object"
-    return "unknown"
-
-
-def _flatten_key_types(obj: dict, prefix: str = "") -> dict[str, str]:
-    result = {}
-    for k, v in obj.items():
-        path = f"{prefix}.{k}" if prefix else k
-        result[path] = _json_type(v)
-        if isinstance(v, dict):
-            result.update(_flatten_key_types(v, path))
-    return result

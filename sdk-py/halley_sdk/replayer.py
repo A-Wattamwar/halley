@@ -1,12 +1,19 @@
 """
-Halley REPLAY mode shim for the OpenAI Python SDK.
+Halley REPLAY mode shim (pure and hybrid) for the OpenAI Python SDK.
 
-Patches the same `httpx.Client.send` interception point as RECORD mode.
-On each outgoing call, computes the D22 canonical match_key, looks up the
-cassette using ordinal per-key consumption, and returns a synthetic response
-WITHOUT any network call.
+Patches `httpx.Client.send` at the same interception point as RECORD mode.
 
-Pure mode: any miss raises ReplayMiss (non-zero exit). Hybrid mode is Day 3.
+Pure mode (default):
+  On each intercepted call, computes D22 match_key, looks up the cassette
+  via ordinal per-key cursor. HIT → synthetic response, no network call.
+  MISS → sys.exit(78) with a clear error. $0 cost guaranteed.
+
+Hybrid mode (HALLEY_HYBRID=1 or HALLEY_MODE=hybrid):
+  HIT → served from cassette ($0).
+  MISS → real live call to the provider, response recorded as a new
+         cassette version for diffing. Reports live-call count + cost.
+
+Both modes write served entries to HALLEY_SERVED_JSON for invariant evaluation.
 """
 
 import atexit
@@ -20,6 +27,7 @@ from typing import Any
 import httpx
 
 from halley_sdk.canonical import canonical_hash
+from halley_sdk.schema_inference import compute_span_cost
 
 
 class ReplayMiss(Exception):
@@ -38,6 +46,7 @@ class Cassette:
 
         self.observations: list[dict] = self.fixture.get("observations", [])
         self.invariants: dict = self.fixture.get("invariants", {})
+        self.slug = Path(fixture_path).stem
 
         # Build ordinal lookup: match_key → [obs indices in order].
         self._key_to_indices: dict[str, list[int]] = defaultdict(list)
@@ -66,14 +75,10 @@ class Cassette:
         return self.observations[obs_index]
 
     def load_body(self, body_ref: str | None) -> Any:
-        """Load a body file by its ref path (e.g. halley/fixtures/<slug>/bodies/sha256-xxx.json)."""
+        """Load a body file by its ref path."""
         if not body_ref:
             return None
         ref_path = Path(body_ref)
-        # body_ref is like "halley/fixtures/<slug>/bodies/sha256-xxx.json".
-        # _fixture_dir is the dir containing <slug>.json (which is halley/fixtures/).
-        # So the file is at _fixture_dir / <slug> / bodies / sha256-xxx.json.
-        # Try: relative to the fixture_dir's parent's parent (the repo root).
         candidates = [
             self._fixture_dir / ref_path.relative_to("halley/fixtures") if str(ref_path).startswith("halley/fixtures") else None,
             self._fixture_dir.parent.parent / ref_path,
@@ -85,50 +90,118 @@ class Cassette:
                     return json.load(f)
         return None
 
-    @property
-    def slug(self) -> str:
-        return Path(self.fixture_path).stem
 
+# ── Module-level state ────────────────────────────────────────────────────
 
-# ── Replay state ──────────────────────────────────────────────────────────
-
-_original_send: object = None
+_original_send: Any = None
 _cassette: Cassette | None = None
-_served: list[dict] = []
+_mode: str = "pure"  # "pure" or "hybrid"
+_served: list[dict] = []        # all served entries (hits + live misses)
+_live_calls: list[dict] = []    # hybrid: only the live-call entries
 _call_index: int = 0
 _patched: bool = False
 _miss_errors: list[str] = []
+_written: bool = False
+
+# Irreversible tool config: set from env HALLEY_IRREVERSIBLE_TOOLS (comma-sep)
+_irreversible_tools: set[str] = set()
 
 
-def _replay_send(self: httpx.Client, request: httpx.Request, **kwargs) -> httpx.Response:
-    """Intercept httpx requests and serve from cassette."""
-    global _call_index
-
+def _is_openai_post(request: httpx.Request) -> bool:
     url = str(request.url)
-    is_openai = (
+    return (
         "api.openai.com" in url
         or "openai" in url.lower()
     ) and request.method == "POST"
 
-    if not is_openai:
-        return _original_send(self, request, **kwargs)
 
-    # Parse the request body.
-    request_body = None
+def _parse_request_body(request: httpx.Request) -> dict | None:
     try:
-        raw_bytes = request.content
-        if raw_bytes:
-            request_body = json.loads(raw_bytes)
+        raw = request.content
+        if raw:
+            return json.loads(raw)
     except (json.JSONDecodeError, UnicodeDecodeError):
         pass
+    return None
 
+
+def _check_irreversible_tool(request_body: dict) -> None:
+    """Guard: refuse live call if tools in the request are marked irreversible."""
+    if not _irreversible_tools:
+        return
+    tools = request_body.get("tools", [])
+    for tool in tools:
+        name = (tool.get("function") or {}).get("name") or tool.get("name", "")
+        if name in _irreversible_tools:
+            msg = (
+                f"[halley-shim] IRREVERSIBLE TOOL GUARD: tool '{name}' is marked "
+                f"irreversible and this call is a cassette miss in hybrid mode. "
+                f"Pass --allow-irreversible to permit live calls for irreversible tools."
+            )
+            print(msg, flush=True)
+            _miss_errors.append(msg)
+            _write_served()
+            import sys
+            sys.exit(79)  # EX_DATAERR-adjacent, distinct from pure-miss (78)
+
+
+# ── Interceptor ──────────────────────────────────────────────────────────
+
+def _replay_send(self: httpx.Client, request: httpx.Request, **kwargs) -> httpx.Response:
+    """Intercept httpx requests: serve from cassette (HIT) or handle miss."""
+    global _call_index
+
+    if not _is_openai_post(request):
+        return _original_send(self, request, **kwargs)
+
+    request_body = _parse_request_body(request)
     if request_body is None:
         return _original_send(self, request, **kwargs)
 
     match_key = canonical_hash(request_body)
     obs = _cassette.lookup(match_key) if _cassette else None
 
-    if obs is None:
+    # ── HIT ──
+    if obs is not None:
+        output_body = _cassette.load_body(obs.get("output_body_ref")) or {}
+        response_bytes = json.dumps(output_body).encode("utf-8")
+
+        model = request_body.get("model", obs.get("model", ""))
+        print(
+            f"[halley-shim] REPLAY HIT  #{_call_index}: "
+            f"{model} {obs.get('operation', '?')} "
+            f"→ cassette obs[{obs['index']}] "
+            f"(match_key={match_key[:16]}...)",
+            flush=True,
+        )
+
+        served_entry = {
+            "call_index": _call_index,
+            "match_key": match_key,
+            "observation_index": obs["index"],
+            "source": "cassette",
+            "operation": obs.get("operation", ""),
+            "model": model,
+            "input_tokens": obs.get("input_tokens", 0),
+            "output_tokens": obs.get("output_tokens", 0),
+            "started_at_ms": int(time.time() * 1000),
+            "ended_at_ms": int(time.time() * 1000),
+            "duration_ms": 0,
+            "input_body": request_body,
+            "output_body": output_body,
+        }
+        _served.append(served_entry)
+        _call_index += 1
+
+        return httpx.Response(
+            status_code=200,
+            headers={"content-type": "application/json"},
+            content=response_bytes,
+            request=request,
+        )
+
+    # ── MISS ──
+    if _mode == "pure":
         msg = (
             f"[halley-shim] REPLAY MISS at call #{_call_index}: "
             f"match_key={match_key[:16]}... not found in cassette "
@@ -136,72 +209,99 @@ def _replay_send(self: httpx.Client, request: httpx.Request, **kwargs) -> httpx.
         )
         print(msg, flush=True)
         _miss_errors.append(msg)
-        # Write served entries before dying (for partial evaluation).
         _write_served()
         import sys
-        sys.exit(78)  # EX_CONFIG — distinct from generic failure
+        sys.exit(78)
 
-    # Load the recorded response body.
-    output_body = _cassette.load_body(obs.get("output_body_ref"))
-    if output_body is None:
-        output_body = {}
+    # ── HYBRID MISS: live call ──
+    _check_irreversible_tool(request_body)
 
-    response_bytes = json.dumps(output_body).encode("utf-8")
-
-    served_entry = {
-        "call_index": _call_index,
-        "match_key": match_key,
-        "observation_index": obs["index"],
-        "operation": obs.get("operation", ""),
-        "model": obs.get("model", ""),
-        "input_tokens": obs.get("input_tokens", 0),
-        "output_tokens": obs.get("output_tokens", 0),
-        "served_at_ms": int(time.time() * 1000),
-        "input_body": request_body,
-        "output_body": output_body,
-    }
-    _served.append(served_entry)
-
-    model = request_body.get("model", obs.get("model", ""))
+    started_at_ms = int(time.time() * 1000)
     print(
-        f"[halley-shim] REPLAY HIT  #{_call_index}: "
-        f"{model} {obs.get('operation', '?')} "
-        f"→ cassette obs[{obs['index']}] "
-        f"(match_key={match_key[:16]}...)",
+        f"[halley-shim] HYBRID MISS #{_call_index}: "
+        f"match_key={match_key[:16]}... → live call",
         flush=True,
     )
+
+    live_response = _original_send(self, request, **kwargs)
+    ended_at_ms = int(time.time() * 1000)
+
+    live_body: dict = {}
+    try:
+        live_body = json.loads(live_response.text) if live_response.text else {}
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        pass
+
+    model = request_body.get("model", "")
+    usage = live_body.get("usage", {})
+    input_tokens = usage.get("prompt_tokens", 0)
+    output_tokens = usage.get("completion_tokens", 0)
+    cost = compute_span_cost(input_tokens, output_tokens, model)
+
+    print(
+        f"[halley-shim] HYBRID LIVE  #{_call_index}: {model} "
+        f"({input_tokens}+{output_tokens} tokens, ${cost:.6f})",
+        flush=True,
+    )
+
+    live_entry = {
+        "call_index": _call_index,
+        "match_key": match_key,
+        "observation_index": None,
+        "source": "live",
+        "operation": "chat",
+        "model": model,
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
+        "started_at_ms": started_at_ms,
+        "ended_at_ms": ended_at_ms,
+        "duration_ms": ended_at_ms - started_at_ms,
+        "cost_usd": cost,
+        "input_body": request_body,
+        "output_body": live_body,
+    }
+    _served.append(live_entry)
+    _live_calls.append(live_entry)
     _call_index += 1
 
-    # Build a synthetic httpx.Response.
-    return httpx.Response(
-        status_code=200,
-        headers={"content-type": "application/json"},
-        content=response_bytes,
-        request=request,
-    )
+    return live_response
 
 
 # ── Patch / unpatch ──────────────────────────────────────────────────────
 
-def patch(cassette_path: str) -> None:
-    """Activate REPLAY mode with the given cassette."""
-    global _original_send, _cassette, _call_index, _patched, _served, _miss_errors
+def patch(cassette_path: str, mode: str = "pure") -> None:
+    """Activate REPLAY mode (pure or hybrid) with the given cassette."""
+    global _original_send, _cassette, _mode, _call_index, _patched
+    global _served, _live_calls, _miss_errors, _written, _irreversible_tools
 
     if _patched:
         return
 
     _cassette = Cassette(cassette_path)
+    _mode = mode
     _original_send = httpx.Client.send
     httpx.Client.send = _replay_send
     _call_index = 0
     _served = []
+    _live_calls = []
     _miss_errors = []
+    _written = False
+
+    # Load irreversible tools from env (set by CLI from halley.config.json).
+    irreversible_env = os.environ.get("HALLEY_IRREVERSIBLE_TOOLS", "")
+    _irreversible_tools = {t.strip() for t in irreversible_env.split(",") if t.strip()}
+    _allow_irreversible = os.environ.get("HALLEY_ALLOW_IRREVERSIBLE", "") == "1"
+    if _allow_irreversible:
+        _irreversible_tools = set()
+
     _patched = True
 
     atexit.register(_on_exit)
     print(
-        f"[halley-shim] REPLAY mode active "
-        f"(cassette={_cassette.slug}, {len(_cassette.observations)} observations)",
+        f"[halley-shim] REPLAY mode={mode} active "
+        f"(cassette={_cassette.slug}, {len(_cassette.observations)} observations"
+        + (f", irreversible_guard={sorted(_irreversible_tools)}" if _irreversible_tools else "")
+        + ")",
         flush=True,
     )
 
@@ -216,39 +316,118 @@ def unpatch() -> None:
 
 
 def get_served() -> list[dict]:
-    """Return the list of served replay entries (for invariant evaluation)."""
     return list(_served)
 
 
+def get_live_calls() -> list[dict]:
+    return list(_live_calls)
+
+
 def get_miss_errors() -> list[str]:
-    """Return any miss errors that occurred."""
     return list(_miss_errors)
 
 
-_written = False
-
-
 def _write_served() -> None:
-    """Write served entries to disk (idempotent)."""
+    """Write served entries and hybrid cassette (idempotent)."""
     global _written
     if _written:
         return
     _written = True
-    hits = len(_served)
-    misses = len(_miss_errors)
-    total = _cassette.observations if _cassette else []
+
+    hits = sum(1 for s in _served if s.get("source") == "cassette")
+    live = len(_live_calls)
+    total_obs = len(_cassette.observations) if _cassette else 0
+    total_live_cost = sum(s.get("cost_usd", 0.0) for s in _live_calls)
+
     print(
-        f"[halley-shim] replay done: {hits} hits, {misses} misses, "
-        f"{len(total)} cassette observations",
+        f"[halley-shim] replay done: {hits} hits, {live} live calls, "
+        f"{len(_miss_errors)} pure-misses, {total_obs} cassette observations",
         flush=True,
     )
+    if live > 0:
+        print(
+            f"[halley-shim] hybrid live-call cost: ${total_live_cost:.6f} "
+            f"({live} call(s))",
+            flush=True,
+        )
+
+    # Write served entries for invariant evaluation.
     output_path = os.environ.get("HALLEY_SERVED_JSON")
     if output_path:
         with open(output_path, "w") as f:
             json.dump(_served, f, indent=2)
         print(f"[halley-shim] served entries written to {output_path}", flush=True)
 
+    # Hybrid: write a new cassette version alongside the old.
+    if _live_calls and _cassette:
+        _write_hybrid_cassette()
+
+    # Write cost summary for CLI to parse.
+    cost_path = os.environ.get("HALLEY_COST_JSON")
+    if cost_path:
+        summary = {
+            "hits": hits,
+            "live_calls": live,
+            "total_cost_usd": total_live_cost,
+        }
+        with open(cost_path, "w") as f:
+            json.dump(summary, f)
+
+
+def _write_hybrid_cassette() -> None:
+    """Write a new versioned cassette for the hybrid run's drifted calls."""
+    from halley_sdk.fixture_writer import write_fixture
+
+    if not _cassette:
+        return
+
+    # Build a new observation list: cassette hits as-is, live calls as new obs.
+    observations = []
+    for entry in _served:
+        obs = {
+            "span_id": f"{entry['call_index']:016X}",
+            "parent_span_id": None,
+            "operation": entry.get("operation", "chat"),
+            "model": entry.get("model", ""),
+            "system": "openai",
+            "status": "ok",
+            "started_at_ms": entry.get("started_at_ms", 0),
+            "ended_at_ms": entry.get("ended_at_ms", 0),
+            "duration_ms": entry.get("duration_ms", 0),
+            "input_tokens": entry.get("input_tokens", 0),
+            "output_tokens": entry.get("output_tokens", 0),
+            "input_body": entry.get("input_body"),
+            "output_body": entry.get("output_body"),
+        }
+        observations.append(obs)
+
+    # Versioned slug: <original>-hybrid-<timestamp>
+    ts = int(time.time())
+    new_slug = f"{_cassette.slug}-hybrid-{ts}"
+    fixtures_dir = str(_cassette._fixture_dir)
+
+    write_fixture(slug=new_slug, observations=observations, fixtures_dir=fixtures_dir,
+                  run_name=f"{_cassette.slug} (hybrid)")
+
+    print(
+        f"[halley-shim] hybrid cassette written: {new_slug}.json "
+        f"({len(_live_calls)} drifted observation(s) updated)",
+        flush=True,
+    )
+
+    # Record path for CLI to know the new cassette.
+    cost_path = os.environ.get("HALLEY_COST_JSON")
+    if cost_path:
+        try:
+            with open(cost_path) as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+        data["hybrid_cassette_slug"] = new_slug
+        with open(cost_path, "w") as f:
+            json.dump(data, f)
+
 
 def _on_exit() -> None:
-    """atexit handler — delegates to _write_served."""
+    """atexit handler — write served + hybrid cassette."""
     _write_served()

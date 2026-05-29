@@ -35,6 +35,12 @@ enum Command {
         /// JUnit XML output path.
         #[arg(long, default_value = "halley-results.xml")]
         junit: PathBuf,
+        /// Replay mode: "pure" (default, $0) or "hybrid" (live on miss).
+        #[arg(long, default_value = "pure")]
+        mode: String,
+        /// Allow live calls for irreversible tools on a cassette miss (hybrid only).
+        #[arg(long, default_value_t = false)]
+        allow_irreversible: bool,
     },
     /// Show prompt/model/output deltas between recorded baseline and current run.
     Diff {
@@ -56,11 +62,13 @@ fn main() -> Result<()> {
 
     match cli.command {
         Command::Record { input } => cmd_record(&cli.config, &cfg, input),
-        Command::Ci { only, junit } => cmd_ci(&cli.config, &cfg, only, &junit),
-        Command::Diff { .. } => {
-            eprintln!("halley diff: not yet implemented (Day 3)");
-            Ok(())
-        }
+        Command::Ci {
+            only,
+            junit,
+            mode,
+            allow_irreversible,
+        } => cmd_ci(&cli.config, &cfg, only, &junit, &mode, allow_irreversible),
+        Command::Diff { fixture } => cmd_diff(&cli.config, &cfg, &fixture),
         Command::Bisect { .. } => {
             eprintln!("halley bisect: not yet implemented (Day 4)");
             Ok(())
@@ -186,6 +194,9 @@ fn cmd_record(
         paths.fixtures_dir.to_str().unwrap_or("halley/fixtures"),
     );
     cmd.env(&cfg.shim.replay_env_var, "record");
+    if let Some(ref slug) = cfg.agent.fixture_slug {
+        cmd.env("HALLEY_FIXTURE_SLUG", slug);
+    }
 
     cmd.stdin(std::process::Stdio::inherit());
     cmd.stdout(std::process::Stdio::inherit());
@@ -212,6 +223,8 @@ fn cmd_ci(
     cfg: &config::HalleyConfig,
     only: Option<String>,
     junit_path: &std::path::Path,
+    mode: &str,
+    allow_irreversible: bool,
 ) -> Result<()> {
     let paths = resolve_paths(config_path, cfg)?;
 
@@ -272,6 +285,28 @@ fn cmd_ci(
             "HALLEY_SERVED_JSON",
             served_path.to_str().unwrap_or_default(),
         );
+
+        // Cost/summary JSON for hybrid mode.
+        let cost_path = paths.site_dir.join(format!("cost-{slug}.json"));
+        cmd.env("HALLEY_COST_JSON", cost_path.to_str().unwrap_or_default());
+
+        // Mode env vars.
+        if mode == "hybrid" {
+            cmd.env("HALLEY_HYBRID", "1");
+        }
+        if allow_irreversible {
+            cmd.env("HALLEY_ALLOW_IRREVERSIBLE", "1");
+        }
+        // Pass irreversible tool names from config.
+        let irreversible: Vec<&str> = cfg
+            .tools
+            .iter()
+            .filter(|t| t.irreversible)
+            .map(|t| t.name.as_str())
+            .collect();
+        if !irreversible.is_empty() {
+            cmd.env("HALLEY_IRREVERSIBLE_TOOLS", irreversible.join(","));
+        }
         cmd.env(&cfg.shim.replay_env_var, "replay");
 
         cmd.stdin(std::process::Stdio::inherit());
@@ -297,6 +332,38 @@ fn cmd_ci(
                 slug
             ));
             continue;
+        }
+
+        // In hybrid mode, report live-call cost.
+        if mode == "hybrid" && cost_path.exists() {
+            if let Ok(cost_json) = std::fs::read_to_string(&cost_path) {
+                if let Ok(cost_val) = serde_json::from_str::<serde_json::Value>(&cost_json) {
+                    let hits = cost_val.get("hits").and_then(|v| v.as_u64()).unwrap_or(0);
+                    let live = cost_val
+                        .get("live_calls")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(0);
+                    let cost = cost_val
+                        .get("total_cost_usd")
+                        .and_then(|v| v.as_f64())
+                        .unwrap_or(0.0);
+                    let new_cassette = cost_val
+                        .get("hybrid_cassette_slug")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    eprintln!(
+                        "[halley ci] hybrid summary: {} hits, {} live calls, ${:.6} spent{}",
+                        hits,
+                        live,
+                        cost,
+                        if new_cassette.is_empty() {
+                            String::new()
+                        } else {
+                            format!(", new cassette: {}", new_cassette)
+                        }
+                    );
+                }
+            }
         }
 
         // Check if served.json was written.
@@ -375,6 +442,67 @@ fn cmd_ci(
     }
 
     eprintln!("[halley ci] ALL PASSED");
+    Ok(())
+}
+
+fn cmd_diff(
+    config_path: &std::path::Path,
+    cfg: &config::HalleyConfig,
+    fixture_slug: &str,
+) -> Result<()> {
+    let paths = resolve_paths(config_path, cfg)?;
+    let fixtures_dir = &paths.fixtures_dir;
+
+    // Find the baseline fixture.
+    let baseline_path = fixtures_dir.join(format!("{fixture_slug}.json"));
+    if !baseline_path.exists() {
+        anyhow::bail!("Baseline fixture not found: {}", baseline_path.display());
+    }
+
+    // Find the most recent hybrid cassette alongside the baseline.
+    let mut hybrid_candidates: Vec<PathBuf> = std::fs::read_dir(fixtures_dir)?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| {
+            p.extension().is_some_and(|e| e == "json")
+                && p.file_stem()
+                    .and_then(|s| s.to_str())
+                    .is_some_and(|s| s.starts_with(&format!("{fixture_slug}-hybrid-")))
+        })
+        .collect();
+    hybrid_candidates.sort();
+
+    let current_path = match hybrid_candidates.last() {
+        Some(p) => p.clone(),
+        None => {
+            eprintln!("[halley diff] No hybrid cassette found for '{fixture_slug}'. Run `halley ci --mode hybrid` first.");
+            return Ok(());
+        }
+    };
+
+    // Delegate to Python diff runner for human-readable output.
+    let diff_output = std::process::Command::new("python3")
+        .args([
+            "-m",
+            "halley_sdk.diff_runner",
+            baseline_path.to_str().unwrap_or_default(),
+            current_path.to_str().unwrap_or_default(),
+        ])
+        .env("PYTHONPATH", &paths.pypath)
+        .current_dir(&paths.agent_cwd)
+        .output()
+        .context("running diff runner")?;
+
+    let stdout = String::from_utf8_lossy(&diff_output.stdout);
+    let stderr = String::from_utf8_lossy(&diff_output.stderr);
+    print!("{}", stdout);
+    if !stderr.is_empty() {
+        eprint!("{}", stderr);
+    }
+
+    if !diff_output.status.success() {
+        std::process::exit(diff_output.status.code().unwrap_or(1));
+    }
     Ok(())
 }
 

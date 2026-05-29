@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant. For math problems, write Python code to solve it.\nPut the final answer in a variable called 'answer'.\nOnly output the Python code, nothing else. No markdown, no explanation."
+    },
+    {
+      "role": "user",
+      "content": "Solve: 47 * 23 + 20"
+    }
+  ],
+  "model": "gpt-4o-mini",
+  "max_tokens": 1024,
+  "temperature": 0.0
+}
