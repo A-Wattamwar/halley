@@ -1,0 +1,16 @@
+{
+  "agent": {
+    "command": [".venv/bin/python", "agent.py", "Solve: 47 * 23 + 19"],
+    "cwd": "../reasoning-agent-python"
+  },
+  "shim": {
+    "provider": "openai",
+    "replay_env_var": "HALLEY_MODE"
+  },
+  "fixtures_dir": "../replay-target/halley/fixtures",
+  "tools": [],
+  "replay": {
+    "mode": "pure",
+    "headroom": 1.2
+  }
+}
