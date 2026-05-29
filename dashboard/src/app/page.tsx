@@ -99,6 +99,13 @@ export default async function RunsPage({ searchParams }: PageProps) {
         </div>
         <div className="flex items-center gap-4">
           <Link
+            href="/fixtures"
+            className="text-xs text-gray-500 hover:text-gray-300 transition-colors pt-1"
+            title="Regression test fixtures"
+          >
+            Fixtures →
+          </Link>
+          <Link
             href="/settings/keys"
             className="text-xs text-gray-500 hover:text-gray-300 transition-colors pt-1"
             title="API key management"

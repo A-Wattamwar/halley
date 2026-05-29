@@ -1179,3 +1179,77 @@ Strategy `input_body_hash_v1`: the replay shim (Week 10) intercepts each outgoin
 **Body files** (`sha256-<hash>.json`): contain the parsed JSON of the recorded input or output body. Content-addressed by the stored ClickHouse `body_hash` (SHA-256 of the D22 canonical JSON), deduplicated — if two spans share the same body, they reference the same file. The hash is **not recomputed** by the writer; it is reused from `halley.observation_body.body_hash` as stored by the ingester. This is correct because the ingester already applies D22 canonicalization before hashing.
 
 **Rationale:** portable, in-repo, vendor-independent fixtures that travel with the codebase are Halley's core differentiator versus hosted platforms (Braintrust, Langfuse, Patronus). The fixture is a plain JSON file a developer can read, diff, and commit — no proprietary format, no API dependency, no account required to run regression tests. `fixture_format_version` enables non-breaking additions (new top-level keys at v1 are ignored by older tooling) and explicit migration when breaking changes are needed.
+
+---
+
+## 2026-05-29 — Phase 5 Week 9 Day 4 (review)
+
+### D53. Bit-fidelity replay comes from a dual-mode capture shim, not from OTLP. Refines D51 and D52.
+
+**Context — the gap caught in the Day 4 fixture-format review.** The fixture
+format (D52) defines `match_key` as the D22 SHA-256 of the recorded *input body*,
+and the replay shim (D51) was assumed to match a live provider call against it.
+But the bodies stored in `halley.observation_body` for every OTLP dialect are a
+**gen_ai-semantic reconstruction**, not the raw provider payload. For
+`otel-genai` (the flagship reasoning-agent), `input_body` is assembled from
+`gen_ai.*.message` span events as `[{role, content}, …]`
+(`ingester/src/normalizer/otel_genai.rs`); it omits `model`, `temperature`,
+`tools`, `seed`, and the full response object (`id`, `usage`, `finish_reason`).
+Standard OTLP gen_ai instrumentation never emits the full raw payloads — the
+bytes are gone before telemetry is created. Therefore:
+
+1. `hash(canonical(live raw request))` cannot equal a `match_key` computed over a
+   gen_ai-semantic body — they are different JSON. Pure OTLP cassettes are not
+   byte-replayable.
+2. **"Bit-fidelity cassette" is physically impossible from OTLP alone.** Raw bytes
+   must be captured at the source.
+
+**Decision.** The per-language shim from D51 is **dual-mode** and is the
+bit-fidelity capture point:
+
+- **Record mode (runs in production and under `halley record`):** wraps the
+  provider client, passes the call through untouched, and captures the **full raw
+  request and response JSON**, emitting them to Halley as a `halley-raw` span
+  (the dialect already accepts arbitrary bodies). `observation_body` then holds
+  byte-faithful payloads.
+- **Replay mode (CI):** intercepts each call, canonicalizes with the **same code
+  path**, matches `match_key`, serves the recorded response.
+
+Because one shim canonicalizes in both modes, record/replay representation parity
+is guaranteed by construction, and a production run through the shim *is* a
+directly replayable cassette (no separate record pass). Both product claims hold
+literally: **bit-fidelity cassette = true**, **production traffic IS your test
+suite = true** — for runs captured through the shim.
+
+**Two-tier capture model (the honest framing):**
+- **Tier 1 — any OTLP instrumentation, zero Halley code:** observability, run
+  grouping, cost, invariant *inference*. Broad compatibility; bodies are
+  gen_ai-semantic, not byte-faithful.
+- **Tier 2 — add the Halley recorder (one-line client wrap):** everything in
+  Tier 1 **plus** bit-fidelity cassettes that replay at $0 in CI. This is the
+  hero loop.
+
+This is consistent with ARCHITECTURE §3.1 ("Halley SDK, optional") — the SDK is
+elevated from optional convenience to the bit-fidelity capture path, but OTLP
+remains the zero-friction observability tier. It matches how every working replay
+tool operates (instrument the client; see the D51 research on vcr-llm, nock,
+Braintrust's SDK wrapper).
+
+**Consequent refinements:**
+- **`match_key` matching is ordinal, not pure lookup.** When multiple calls in a
+  run share an input hash (loops, retries), the shim consumes recorded
+  observations of that `match_key` in `index` order via a per-key cursor. The
+  D52 `replay_matching` description must say so; "look up the matching
+  observation" alone is ambiguous and was a v1 hole.
+- **The D52 fixture format is provisional, not locked, until Week 10 validates it
+  against the real shim.** The `LOCKED CONTRACT` banner in
+  `docs/fixture-format.md` is downgraded to "v1 — provisional pending Week 10
+  replay validation." The on-disk *shape* is stable; `match_key` semantics and
+  the body source (shim-raw vs OTLP-semantic) are confirmed in Week 10.
+- **`match_key` and body-file hashes must be the same case (lowercase).** The Day
+  4 artifact emitted `match_key` upper-case while body filenames were lower-case;
+  a case mismatch breaks string-equality matching. Fix before the format is
+  considered final.
+
+**Impact on Week 10:** the shim now ships record mode (production capture) in
+addition to replay mode. Plan updated in `docs/plan/phase-5-overview.md`.
