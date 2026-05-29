@@ -1,7 +1,7 @@
 {
   "messages": [
     {
-      "content": "hello",
+      "content": "What is 2+2?",
       "role": "user"
     }
   ]

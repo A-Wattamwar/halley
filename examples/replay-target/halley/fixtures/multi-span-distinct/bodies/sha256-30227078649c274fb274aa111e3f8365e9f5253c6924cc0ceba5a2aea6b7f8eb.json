@@ -1,0 +1,16 @@
+{
+  "messages": [
+    {
+      "content": "What is 2+2?",
+      "role": "user"
+    },
+    {
+      "content": "4",
+      "role": "tool"
+    },
+    {
+      "content": "Great, now what is 3+3?",
+      "role": "user"
+    }
+  ]
+}

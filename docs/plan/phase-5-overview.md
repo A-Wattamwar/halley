@@ -26,7 +26,30 @@ The CLI is a Rust binary (ROADMAP deliverable #4, ARCHITECTURE §3.8), but the u
 - **TS shim** reuses the `sdk-ts/` scaffold — late Week 10 if time allows, else Phase 6.
 - HTTP proxy documented as a fallback for languages without a shim.
 
-This is **D51** (recorded below).
+This is **D51** (recorded in DECISIONS.md).
+
+### Refinement — the shim is DUAL-MODE; bit-fidelity comes from it, not OTLP (D53, 2026-05-29)
+
+The Day-4 fixture-format review surfaced that OTLP-captured bodies are
+gen_ai-*semantic* (e.g. `otel-genai` stores `[{role,content}]` reconstructed from
+span events), **not** the raw provider payload — so a pure-OTLP cassette is not
+byte-replayable, and "bit-fidelity" is physically impossible from OTLP alone (the
+raw bytes never reach telemetry). Resolution (D53): the same per-language shim
+runs in **two modes**:
+- **Record mode (production + `halley record`):** wraps the client, captures the
+  **full raw request/response JSON**, emits them to Halley as `halley-raw` spans.
+  `observation_body` then holds byte-faithful payloads.
+- **Replay mode (CI):** intercepts, canonicalizes with the same code, matches,
+  serves.
+
+One code path canonicalizes both times → record/replay parity by construction,
+and a production run through the shim *is* a directly replayable cassette.
+**Both claims hold: bit-fidelity = true, production-traffic-is-your-test-suite =
+true** — for shim-captured runs. **Two-tier model:** Tier 1 (any OTLP, zero code)
+= observability + invariant inference; Tier 2 (one-line Halley recorder) =
+bit-fidelity cassettes + $0 CI replay (the hero loop). `match_key` matching is
+**ordinal** (per-key cursor in `index` order) to handle repeated identical calls.
+See D53 for full rationale.
 
 ---
 
@@ -46,7 +69,7 @@ This is **D51** (recorded below).
 - `cli/` — **does not exist.** Created in Week 10.
 - `sdk-ts/` — scaffold only. Becomes the home of the TS replay shim (D51), but TS is second priority; Python shim ships first.
 - Postgres `fixtures` (`id, project_id, source_run_id, repo_path, invariants_json JSONB, status ∈ {proposing,ready,stale}, last_replay_at, created_at`) and `bisect_jobs` (`id, fixture_id, base_commit, head_commit, status ∈ {queued,running,done,failed}, result_commit, log, created_at, completed_at`) — **already exist from Phase 1.** No new tables expected; columns may need additive widening only.
-- ClickHouse `observation_body` (content-addressed, SHA-256, deduped) — **live since Phase 2.** Cassette bodies are already captured. Phase 5 reads them, it does not change capture.
+- ClickHouse `observation_body` (content-addressed, SHA-256, deduped) — **live since Phase 2.** OTLP runs store gen_ai-*semantic* bodies (not byte-faithful). **Bit-fidelity bodies come from the dual-mode shim's record mode** emitting `halley-raw` spans with the full raw request/response (D53). The Week 9 fixture writer reads whatever is in `observation_body`; bit-fidelity replay requires Tier-2 (shim) capture.
 
 **Phase 5 scope per ROADMAP v0.6 (§ Phase 5):**
 - Worker `invariant.infer`: structural, schema, metric invariants auto-proposed.
@@ -149,6 +172,24 @@ Backend-and-dashboard week. The deliverable is: **click a run → get proposed i
 
 ---
 
+## Week 9 checkpoint (2026-05-29)
+
+**Shipped Days 1–5:**
+- **Worker runtime** (D-18): BullMQ on `halley:worker` prefix; two job types: `invariant.infer` and `fixture.write`.
+- **Invariant inference**: structural (span count, operation sequence, replay-stable `parent_index`), schema (per-span key-path/type from output bodies), metric (cost/latency/token bounds × 1.2 headroom), semantic stub (Phase 6).
+- **Invariant editor** (`/fixtures/[id]/edit`): project-scoped Server Component shell + client island; per-section reject/restore, structural exact-vs-subsequence toggle, schema required↔optional one-click loosen, direct numeric metric editing.
+- **Fixture writer**: worker `fixture.write` job writes `halley/fixtures/<slug>.json` + content-addressed body files to `examples/replay-target/` (mounted via Docker volume). Status flips to `ready`. `POST /api/fixtures/:id/save` enqueues from the dashboard.
+- **Dev Redis split fixed**: Docker Redis remapped to host port 6380 (mirrors Postgres 5433 fix); all services override `REDIS_URL` to in-network name; browser button → worker chain verified end-to-end.
+- **`/fixtures` list page**: project-scoped; links to `/runs/[id]` and `/fixtures/[id]/edit`; nav entry from runs list.
+- **Fixture format v1** (`fixture_format_version: 1`): documented in `docs/fixture-format.md`.
+- **D52** (fixture format) and **D53** (two-tier capture model, ordinal match_key cursor) recorded in `docs/DECISIONS.md`.
+
+**Not started (Week 10):** `cli/`, `halley record`, the Python/TS replay shim, bisect, GitHub App, hero demo.
+
+**Fixture format status:** PROVISIONAL (not locked). D53 identified that `match_key` matching requires an ordinal cursor (not bare lookup) and that bit-fidelity replay requires Tier-2 (shim) capture, not OTLP alone. Format will be locked after Week 10 validates it against the real shim.
+
+---
+
 ## Week 10 — CLI, replay, bisect, GitHub Action, hero demo (July 15–21)
 
 The heavy, risky week. Rust CLI built host-side (D-2, cargo) + the Python replay shim. This is where the shim-replay design (D51) earns its keep.
@@ -156,22 +197,24 @@ The heavy, risky week. Rust CLI built host-side (D-2, cargo) + the Python replay
 ### Day 1: `cli/` scaffold + `halley record` + `halley.config.json`
 
 - Create `cli/` (Rust, clap, host-side). Subcommand stubs for `ci`, `record`, `diff`, `bisect`.
-- `halley record <run_id>`: authenticate to the backend (reuse `hlly_` key), pull the run's observations + bodies, write a local fixture using the **Week 9 Day 4 fixture format** (CLI and worker share one format).
 - Define + parse `halley.config.json` (agent run command, replay-mode env var the shim reads, tool config incl. `irreversible` flags, replay defaults).
+- **Python shim — RECORD mode (D53, the bit-fidelity foundation):** patch the provider client/transport in-process; pass each call through untouched while capturing the **full raw request + response JSON** (the bytes, not gen_ai-semantic). `halley record` runs the configured agent command with the shim in record mode and writes a **bit-fidelity** local fixture in the Week 9 Day 4 v1 format (reusing D22 canonical hashing for `match_key` and body content-addressing). This produces the **real canonical fixture** that replaces the synthetic `multi-span-distinct.json` placeholder.
+- (Backend-pull `halley record <run_id>` — promoting an already-ingested run — is Tier-1 fidelity unless that run was shim-captured; keep it as a thin variant, but the live shim-capture path is the primary one.)
 
 **Acceptance:**
-- `halley record <run_id>` writes a valid fixture identical in shape to the dashboard-written one.
-- `cargo build/clippy/fmt/test` clean.
+- `halley record` runs the Python reasoning-agent through the shim and writes a valid v1 fixture with raw (bit-fidelity) bodies; `match_key`s are stable and lowercase.
+- `cargo build/clippy/fmt/test` clean; shim record path unit-tested.
 
-### Day 2: Python replay shim + replay engine (pure mode) + `halley ci` + JUnit XML
+### Day 2: Python shim REPLAY mode + replay engine (pure) + `halley ci` + JUnit XML
 
-- Build the **Python replay shim**: patch the client/transport layer in-process, canonicalize+hash each provider/tool request (D22), match against the cassette, serve recorded responses on hit. Provider-aware so SSE bodies are recorded faithfully.
+- Add **REPLAY mode** to the same shim: intercept each call, canonicalize+hash with the **same code path used in record mode** (parity by construction, D53), match the cassette by `match_key` with **ordinal per-key consumption** (repeated identical calls advance a cursor in `index` order), serve recorded responses on hit.
 - `halley ci`: walk `halley/fixtures/`, for each fixture launch the configured agent command with the shim active (mode + cassette path via env), **pure mode** (all hits, $0), evaluate invariants against the resulting run, aggregate pass/fail.
 - Exit code (0 / non-zero) + **JUnit XML** output for CI.
 
 **Acceptance:**
 - `halley ci` against the unchanged Python example → all cassette hits, $0, all invariants pass, exit 0, JUnit XML emitted.
-- `cargo` clean; shim unit-tested.
+- A run with two identical tool calls replays correctly via ordinal matching (the `multi-span-distinct` case).
+- `cargo` clean; shim replay path unit-tested.
 
 ### Day 3: Hybrid mode + tool-effect-safe replay + `halley diff`
 
@@ -222,8 +265,8 @@ The heavy, risky week. Rust CLI built host-side (D-2, cargo) + the Python replay
 ## New locked contracts introduced this phase
 
 Once shipped, these are locked (changing them breaks users' committed fixtures):
-- **Fixture on-disk format** (`<slug>.json` shape + `bodies/` content-addressing + `fixture_format_version`). Week 9 Day 4.
-- **Cassette matching / replay spec** (canonical request hashing + hit/miss/version semantics). Week 10 Day 2.
+- **Fixture on-disk format** (`<slug>.json` shape + `bodies/` content-addressing + `fixture_format_version`). Written Week 9 Day 4, but **provisional until Week 10 validates it against the real shim** (D53). The on-disk *shape* is stable; `match_key` semantics (ordinal consumption) and the body source (shim-raw vs OTLP-semantic) are confirmed in Week 10. The `LOCKED` banner in `docs/fixture-format.md` stays downgraded to "v1 — provisional" until then.
+- **Cassette matching / replay spec** (canonical request hashing + ordinal per-key consumption + hit/miss/version semantics). Week 10 Day 2.
 
 ---
 

@@ -1,0 +1,10 @@
+{
+  "choices": [
+    {
+      "message": {
+        "content": "Using the calculator tool.",
+        "role": "assistant"
+      }
+    }
+  ]
+}

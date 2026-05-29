@@ -1,13 +1,14 @@
 # Halley Fixture Format v1
 
-> **LOCKED CONTRACT** — `fixture_format_version: 1`
+> **v1 — PROVISIONAL pending Week 10 replay validation** (see D53 in `docs/DECISIONS.md`)
 >
 > This document describes the on-disk layout of a Halley regression fixture.
-> Once a fixture file is committed to a user's repo it is treated as
-> immutable by Halley tooling. Field names and semantics are stable across
-> patch releases. Additive changes (new optional keys) are non-breaking.
-> Breaking changes require incrementing `fixture_format_version` and shipping
-> a migration tool. See D52 in `docs/DECISIONS.md`.
+> The format is stable enough to ship and write fixtures against, but is not
+> yet a locked contract. It will be finalized once the Week 10 replay shim
+> validates the `match_key` / ordinal-cursor matching against real intercepts.
+> Additive changes (new optional top-level or per-observation keys) are
+> non-breaking. Breaking changes require incrementing `fixture_format_version`.
+> See D52 and D53 in `docs/DECISIONS.md`.
 
 ---
 
@@ -124,7 +125,7 @@ Each entry represents one recorded LLM or tool span in execution order.
 | `duration_ms` | integer | `ended_at_ms − started_at_ms`. |
 | `input_tokens` | integer | Prompt token count. |
 | `output_tokens` | integer | Completion token count. |
-| `match_key` | 64-char lowercase hex \| `""` | D22 canonical-JSON SHA-256 of the recorded input body. The replay shim matches incoming calls against this. Empty string = no input body captured. |
+| `match_key` | 64-char lowercase hex \| `""` | D22 canonical-JSON SHA-256 of the recorded input body. The replay shim matches incoming calls against this. **Matching is ordinal**: when multiple observations share the same `match_key` (e.g. a loop that calls the calculator twice with the same argument), the shim advances a per-key cursor through `index` order — the first intercepted call gets `observations[i]`, the second gets `observations[j]` where `j > i` and `match_key[j] == match_key[i]`. Empty string = no input body captured. |
 | `input_body_ref` | string \| `null` | Relative path from the repo root to the input body file. null = no body. |
 | `output_body_ref` | string \| `null` | Relative path to the output body file. null = no body. |
 
@@ -191,14 +192,49 @@ every replay).
 
 The replay shim (Week 10 CLI) intercepts each outgoing LLM provider call,
 computes `hex(SHA-256(canonical_json(request_body)))` using the same D22
-algorithm that the ingester used when recording, and looks up the matching
+algorithm that the ingester used when recording, and finds the matching
 `observations[i]` by `match_key`.
 
-- **Hit**: serve the recorded `output_body_ref` body as the provider response.
-- **Miss**: make a live call, record the new response as a new fixture version.
+**Matching is ordinal, not a bare lookup.** When multiple observations share
+the same `match_key` (loops, retries — e.g. two calculator calls with the same
+arguments), the shim uses a **per-key cursor** that starts at `index=0` and
+advances through the observation list in order. The first intercepted call
+matching key `k` is served by the first recorded observation with `match_key=k`,
+the second intercepted call by the second, and so on. This guarantees
+determinism across repeated identical calls without requiring unique inputs.
+
+- **Hit** (key found, cursor has remaining observations): serve the
+  `output_body_ref` body as the provider response.
+- **Miss** (key not in cassette, or cursor exhausted): make a live call,
+  record the new response as a new fixture version.
 
 The shim does **not** match on URL or HTTP method (all LLM calls POST to one
 endpoint) and does **not** match on `span_id` (unstable across runs).
+
+---
+
+### Body source and replay fidelity (D53)
+
+Two capture tiers determine whether bodies support bit-faithful replay:
+
+- **Tier 1 — any OTLP instrumentation, zero Halley code:** bodies are
+  **gen_ai-semantic reconstructions** assembled by the ingester from span
+  events (`gen_ai.*.message`, `gen_ai.*.tool_call`, etc.). They omit raw
+  provider fields like `model`, `temperature`, `seed`, `id`, and `usage`.
+  Tier-1 bodies are correct for *invariant inference* (schema, metric, cost)
+  but `hash(live raw request) ≠ match_key`, so bit-faithful cassette replay
+  is **not possible from Tier-1 data alone**.
+
+- **Tier 2 — add the Halley recorder (one-line client wrap):** the recorder
+  shim captures the **full raw request and response JSON** and emits them as a
+  `halley-raw` span. `observation_body` then holds byte-faithful payloads, and
+  `hash(live raw request) == match_key` by construction (the same shim
+  canonicalizes in both record and replay modes). Tier-2 cassettes are fully
+  bit-replayable.
+
+Tier 1 gives you observability + invariant inference at zero instrumentation
+cost. Tier 2 adds the $0 CI replay hero loop. Both tiers write identical
+fixture files; the difference is in body content, not format.
 
 ---
 
@@ -244,16 +280,26 @@ requires incrementing `fixture_format_version` to `2` and shipping a
 
 ## 6. Example
 
+A 4-span `chat → execute_tool → chat → execute_tool` run (`multi-span-distinct`,
+`gpt-4o-mini`, `halley-raw` dialect). The two `execute_tool` spans share the
+same `match_key` (`39ef062e…`), demonstrating ordinal cursor matching. The two
+`chat` spans have distinct `match_key` values (`d4e2520a…` and `30227078…`).
+Deduplication: 4 observations × 2 body slots = 8 hash lookups → 6 unique files
+(the two execute_tool spans share both input and output bodies).
+
 ```
 examples/replay-target/
   halley/
     fixtures/
-      test-run-day3.json
-      test-run-day3/
+      multi-span-distinct.json
+      multi-span-distinct/
         bodies/
-          sha256-3a7bd3e2....json    # input body (request)
-          sha256-b14a7bcd....json    # output body (response)
+          sha256-30227078....json   # chat-3 input body
+          sha256-32ef3703....json   # chat-3 output body
+          sha256-39ef062e....json   # execute_tool input body (shared by index 0 + 2)
+          sha256-87fc178a....json   # execute_tool output body (shared by index 0 + 2)
+          sha256-d4e2520a....json   # chat-1 input body
+          sha256-f83182cd....json   # chat-1 output body
 ```
 
-See `examples/replay-target/` in this repository for a real fixture produced
-from a seeded dev run.
+See `examples/replay-target/` in this repository for the actual fixture files.
