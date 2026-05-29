@@ -70,7 +70,13 @@ services:
     # redis.conf inside the image does NOT enable AOF.
     command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
     ports:
-      - "6379:6379"
+      # Host port 6380 → container port 6379.
+      # A native Redis on the dev machine commonly binds localhost:6379,
+      # shadowing the Docker one. Remapping to 6380 mirrors the Postgres
+      # fix (5433:5432). Host-side code (npm run dev, scripts) uses
+      # REDIS_URL=redis://localhost:6380/0; Docker-internal services use
+      # redis://redis:6379/0 (in-network, no port translation needed).
+      - "6380:6379"
     volumes:
       - ./infra/redis/redis.conf:/usr/local/etc/redis/redis.conf:ro
       - redis-data:/data
@@ -121,6 +127,9 @@ services:
     container_name: halley-ingester
     restart: unless-stopped
     env_file: .env
+    environment:
+      # Override host-side REDIS_URL (localhost:6380) with the in-network name.
+      REDIS_URL: "redis://redis:6379/0"
     ports:
       - "4318:4318"  # OTLP/HTTP
       - "4317:4317"  # OTLP/gRPC
@@ -152,12 +161,10 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Inside the container, Postgres is reachable at the compose service
-      # name on its internal port (5432), NOT localhost:5433 (the host-mapped
-      # port). The code default (localhost:5433) is correct for `npm run dev`
-      # on the host but wrong in-container — this override fixes the Settings
-      # page and (once auth is enabled) login in the Docker stack.
+      # Inside the container, Postgres/Redis are reachable at compose service
+      # names on their internal ports — NOT the host-remapped ports (5433/6380).
       POSTGRES_URL: "postgres://${POSTGRES_USER:-halley}:${POSTGRES_PASSWORD:-halley}@postgres:5432/${POSTGRES_DB:-halley}"
+      REDIS_URL: "redis://redis:6379/0"
     ports:
       - "3000:3000"
     depends_on:
@@ -189,8 +196,9 @@ services:
     restart: unless-stopped
     env_file: .env
     environment:
-      # Inside the container Postgres is at the compose service name on port 5432.
+      # In-network: use compose service names and internal ports.
       POSTGRES_URL: "postgres://${POSTGRES_USER:-halley}:${POSTGRES_PASSWORD:-halley}@postgres:5432/${POSTGRES_DB:-halley}"
+      REDIS_URL: "redis://redis:6379/0"
     depends_on:
       clickhouse:
         condition: service_healthy
