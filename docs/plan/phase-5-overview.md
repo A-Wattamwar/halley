@@ -303,3 +303,51 @@ Once shipped, these are locked (changing them breaks users' committed fixtures):
 **Rationale (researched against the May-2026 state of the art):** the tools shipping this pattern (`vcr-llm`, `pytest-agentcontract`, `agentsnap`, `llm-test-harness`) all intercept in-process, because (1) LLM calls all POST to one URL so URL-based proxy matching fails, (2) a proxy loses SSE streaming frame boundaries — breaking bit-fidelity, and (3) a proxy can't see in-process tool calls — which would gut Halley's "same tools, same order" structural invariant. Interception is not Halley's differentiator (portable in-repo fixtures + `bisect` + tool-effect-safe replay are), so the mechanism is chosen to protect those.
 
 **Tradeoff:** a shim is per-language. Mitigated by shipping Python first (the flagship demo is Python), reusing `sdk-ts/` for TS, and documenting an HTTP-proxy fallback for languages without a shim. Superseded only if a future single-binary interception approach proves equal on streaming + in-process tools.
+
+---
+
+## Week 9 checkpoint (Days 1–5)
+
+Shipped Days 1–5: worker runtime on Docker, `invariant.infer` job (structural invariants Day 1; schema+metric Day 2), `/fixtures/[id]/edit` invariant editor with project-scoping (Day 3), `fixture.write` worker job writing to `examples/replay-target/` (Day 4), `/fixtures` list page + nav (Day 5). Redis port remap (`6380:6379`) mirrors the Postgres pattern (`5433`) so `npm run dev` and the Docker worker can both talk Redis without collision. Fixture format v1 written but marked **provisional** pending Week 10 replay validation (D53).
+
+---
+
+## Phase 5 Retrospective (Week 10 Day 5, 2026-05-29)
+
+### What shipped (Days 1–10)
+
+**Week 9 — The dashboard foundation:**
+- Worker: Docker BullMQ service; structural → schema → metric → semantic-stub invariant inference
+- Dashboard: "Turn this run into a test" button; `/fixtures/[id]/edit` invariant editor; `fixture.write` job; `/fixtures` list page; Redis split fixed (port remap)
+- Fixture format v1 on-disk: `<slug>.json` + content-addressed `bodies/` files
+
+**Week 10 — The CLI + replay engine:**
+- **Day 1**: Rust CLI scaffold (`halley record`, `ci`, `diff`, `bisect` stubs), `halley.config.json` schema, Python shim RECORD mode via `sitecustomize.py` injection. Real bit-fidelity fixture recorded ($0.000054, 5 spans).
+- **Day 2**: D22 canonical-hash parity proved rigorously (Python = Rust, byte-identical on real body + adversarial Unicode). Pure-mode replay ($0, ordinal cursor, loud miss exit 78). `halley ci` + JUnit XML. Zero live calls confirmed.
+- **Day 3**: Hybrid mode (live on miss, records new cassette version). Schema inference on the record path (structural+schema+metric in every fixture). Tool-effect-safe replay (irreversible guard, exit 79). `halley diff` human-readable delta.
+- **Day 4**: `cost_max_usd` bug fixed (hybrid mode now evaluates actual live spend). `halley bisect` CLI (binary search, 3× per candidate, repo restore). Demo repo (`~/halley-demo-repo/`, synthetic fixture). `bisect.run` BullMQ job + `BisectPanel` client island.
+- **Day 5**: Hero demo on REAL shim-recorded fixture (`reasoning-agent-math`, 5 spans, authentic OpenAI bodies from Day 1). `halley ci` green → regression commit → `halley ci` red (pure miss at call #0) → `halley bisect` names `c2af6be2` in 3 steps — **6.6 seconds, $0**. GitHub Action (`.github/workflows/halley-ci.yml` + composite action). Fixture format v1 locked. Phase 5 retro written.
+
+### The D53 mid-phase pivot
+
+After Week 9 Day 4, reviewer decision D53 introduced the **dual-mode shim** concept: instead of a single OTLP-based capture path (Tier 1 — gen_ai-semantic bodies only), Halley now has a **Tier 2** bit-fidelity capture path via the Python httpx shim. This changed the fixture format framing (from "locked" to "provisional until Week 10 validates replay") and added significant Week 10 scope (RECORD mode, REPLAY mode, hybrid, tool-effect-safe).
+
+The pivot was the right call: the hero demo now replays byte-identical provider responses, which is the only claim that earns trust with a sophisticated audience.
+
+### Technical debt inventory (carry to Phase 6)
+
+| # | Debt item | Priority |
+|---|-----------|----------|
+| 1 | **D22 triplication** (`ingester/src/domain/span.rs`, `cli/src/bin/canonical_hash.rs`, `sdk-py/halley_sdk/canonical.py`). Extract into a shared `halley-canonical` Rust crate. Risk: if anyone fixes a bug in the ingester's impl, the CLI copy silently diverges despite parity tests. | P0 — first Phase 6 hygiene item |
+| 2 | **In-process tool interception not covered** (v1 shim intercepts at the httpx layer — only sees HTTP-visible tool calls, not in-process Python functions). Document user impact clearly. | P1 |
+| 3 | **TypeScript shim deferred** (`sdk-ts/`). Users with TS agents have no shim; documented proxy fallback only. | P1 |
+| 4 | **`bisect.run` worker job invokes the CLI as a subprocess** (HALLEY_CLI_PATH). The worker container doesn't ship the Rust binary; v1 requires host access. Full server-side bisect (TypeScript implementation or binary bundling) is Phase 6. | P2 |
+| 5 | **Semantic invariants disabled** (v1 ships structural/schema/metric only; LLM-judge rubric is a stub). | P2 |
+| 6 | **GitHub App / fixture push** deferred to Phase 6. Current fixture write is filesystem-only. | P3 |
+
+### Hero demo location
+
+- **Demo repo**: `~/halley-hero-demo/` (own `.git`, outside halley repo)
+- **Real fixture**: `reasoning-agent-math.json` — 5 observations, authentic shim-recorded bodies (Day 1 live capture, $0.000054)
+- **Reproducible script**: `~/halley-hero-demo/demo.sh` — full ci→bisect loop in ~7 seconds, $0
+- **Regression**: commit `c2af6be2` "feat: use natural language problem formulation" changes the question → different classify-question prompt → different D22 match_key → pure-mode MISS at call #0 → deterministic, no LLM variance

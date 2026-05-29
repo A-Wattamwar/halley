@@ -1,0 +1,97 @@
+##############################################################################
+# .github/actions/halley-ci/action.yml
+#
+# Composite action: run halley ci in a target repo.
+#
+# Usage in a workflow:
+#
+#   - uses: ./.github/actions/halley-ci
+#     with:
+#       working-directory: examples/replay-target
+#       junit-path: halley-results.xml
+#       mode: pure           # or hybrid
+#       allow-irreversible: false
+##############################################################################
+
+name: "Halley CI"
+description: "Run halley ci (pure-mode replay) and report fixture results"
+
+inputs:
+  working-directory:
+    description: "Directory containing halley.config.json"
+    required: false
+    default: "."
+  junit-path:
+    description: "Path to write JUnit XML output"
+    required: false
+    default: "halley-results.xml"
+  mode:
+    description: "Replay mode: pure (default, $0) or hybrid (live on miss)"
+    required: false
+    default: "pure"
+  only:
+    description: "Only run this fixture slug (optional)"
+    required: false
+    default: ""
+  allow-irreversible:
+    description: "Allow live calls for irreversible tools in hybrid mode"
+    required: false
+    default: "false"
+  halley-cli-path:
+    description: "Path to halley binary (overrides HALLEY_CLI env)"
+    required: false
+    default: ""
+  sdk-py-path:
+    description: "Path to halley sdk-py directory (overrides HALLEY_SDK_PY_PATH)"
+    required: false
+    default: ""
+
+outputs:
+  exit-code:
+    description: "Exit code from halley ci (0 = all passed)"
+    value: ${{ steps.run.outputs.exit_code }}
+  junit-path:
+    description: "Path to the written JUnit XML"
+    value: ${{ inputs.junit-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Run halley ci
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        HALLEY_CLI_INPUT: ${{ inputs.halley-cli-path }}
+        SDK_PY_INPUT: ${{ inputs.sdk-py-path }}
+      run: |
+        # Resolve binary
+        CLI="${HALLEY_CLI_INPUT:-${HALLEY_CLI:-halley}}"
+        SDK="${SDK_PY_INPUT:-${HALLEY_SDK_PY_PATH:-}}"
+
+        ARGS=(ci "--junit" "${{ inputs.junit-path }}" "--mode" "${{ inputs.mode }}")
+
+        if [[ -n "${{ inputs.only }}" ]]; then
+          ARGS+=("--only" "${{ inputs.only }}")
+        fi
+        if [[ "${{ inputs.allow-irreversible }}" == "true" ]]; then
+          ARGS+=("--allow-irreversible")
+        fi
+
+        # Pure replay: dummy key so OpenAI client initialises without a real key.
+        if [[ "${{ inputs.mode }}" == "pure" ]] && [[ -z "$OPENAI_API_KEY" ]]; then
+          export OPENAI_API_KEY="sk-halley-ci-noop"
+        fi
+
+        if [[ -n "$SDK" ]]; then
+          export HALLEY_SDK_PY_PATH="$SDK"
+        fi
+
+        set +e
+        "$CLI" "${ARGS[@]}"
+        EXIT=$?
+        set -e
+        echo "exit_code=$EXIT" >> "$GITHUB_OUTPUT"
+
+        # Mirror the exit code for the calling workflow to decide how to proceed.
+        exit $EXIT

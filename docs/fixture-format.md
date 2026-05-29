@@ -1,14 +1,20 @@
 # Halley Fixture Format v1
 
-> **v1 — PROVISIONAL pending Week 10 replay validation** (see D53 in `docs/DECISIONS.md`)
+> **v1 — LOCKED** (D52, D53; validated Week 10 Phase 5)
 >
 > This document describes the on-disk layout of a Halley regression fixture.
-> The format is stable enough to ship and write fixtures against, but is not
-> yet a locked contract. It will be finalized once the Week 10 replay shim
-> validates the `match_key` / ordinal-cursor matching against real intercepts.
-> Additive changes (new optional top-level or per-observation keys) are
-> non-breaking. Breaking changes require incrementing `fixture_format_version`.
-> See D52 and D53 in `docs/DECISIONS.md`.
+> This is a **locked contract**: field names, content-addressing scheme, and
+> replay-matching spec are stable. Changing them breaks users' committed
+> fixtures. Additive changes (new **optional** top-level or per-observation
+> keys) are non-breaking. Breaking changes require incrementing
+> `fixture_format_version` and providing a migration tool.
+>
+> **Validation status (Week 10):** The Python shim's record and pure-mode
+> replay paths were validated end-to-end against the real `reasoning-agent-math`
+> fixture (5 observations, authentic OpenAI request/response bodies captured
+> via httpx interception). `match_key` ordinal-cursor semantics confirmed
+> correct. D22 canonical hash parity proven between Python and Rust (unit
+> tests, including adversarial Unicode). See D52 and D53.
 
 ---
 
