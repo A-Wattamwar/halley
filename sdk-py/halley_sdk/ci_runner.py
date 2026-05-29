@@ -3,6 +3,10 @@ CI runner: evaluate a single fixture's replay results.
 
 Called by the halley CLI after the agent subprocess exits.
 Reads the replay results from the shim's output and evaluates invariants.
+
+This module only uses stdlib + halley_sdk.invariants + halley_sdk.schema_inference.
+It deliberately avoids importing halley_sdk.replayer (which needs httpx) so it
+can run in any Python env (e.g. system python3 without httpx installed).
 """
 
 import json
@@ -11,7 +15,6 @@ from pathlib import Path
 from typing import Any
 
 from halley_sdk.invariants import evaluate_invariants
-from halley_sdk.replayer import Cassette
 
 
 def evaluate_fixture(
@@ -27,16 +30,21 @@ def evaluate_fixture(
     Returns:
         List of result dicts for JUnit output.
     """
-    cassette = Cassette(fixture_path)
-    slug = cassette.slug
+    # Load fixture directly — no Cassette class needed (avoids httpx dependency).
+    with open(fixture_path) as f:
+        fixture = json.load(f)
+
+    slug = Path(fixture_path).stem
+    invariants: dict = fixture.get("invariants", {})
+    observations: list[dict] = fixture.get("observations", [])
 
     with open(served_json_path) as f:
         served = json.load(f)
 
     results = evaluate_invariants(
-        invariants=cassette.invariants,
+        invariants=invariants,
         served=served,
-        cassette_observations=cassette.observations,
+        cassette_observations=observations,
     )
 
     return [

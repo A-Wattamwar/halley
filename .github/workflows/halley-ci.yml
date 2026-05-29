@@ -1,0 +1,188 @@
+##############################################################################
+# halley-ci.yml — Run halley ci in pure-mode ($0) on every pull request.
+#
+# What it does:
+#   1. Checks out the repo (with full history for halley bisect).
+#   2. Installs Rust (stable) and builds the halley CLI from source.
+#   3. Sets up Python 3.13 and installs the halley-sdk shim.
+#   4. Runs `halley ci` in pure replay mode — zero live calls, $0 cost.
+#   5. Publishes the JUnit XML as a test report (GitHub Actions test summary).
+#   6. On failure: prints a `halley diff` hint and a suggested bisect command.
+#
+# Secrets required:
+#   None for pure-mode CI ($0 — no OpenAI calls).
+#   OPENAI_API_KEY is optional; when set, `--mode hybrid` becomes available.
+#
+# Adding fixtures:
+#   1. `halley record` in your local repo (requires OPENAI_API_KEY).
+#   2. Commit the resulting halley/fixtures/<slug>.json + bodies/.
+#   3. This workflow picks them up automatically.
+##############################################################################
+
+name: Halley CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  checks: write       # publish test results as PR check
+  pull-requests: write # post PR comment on failure
+
+jobs:
+  halley-ci:
+    name: Replay fixtures (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]   # add macos-latest for cross-platform coverage
+
+    steps:
+      # ── Checkout ──────────────────────────────────────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # full history — required for halley bisect
+
+      # ── Rust + CLI build ──────────────────────────────────────────────────
+      - name: Install Rust (stable, pinned 1.85)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+
+      - name: Cache Cargo registry + build
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cli/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('cli/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build halley CLI
+        working-directory: cli
+        run: |
+          cargo build --release
+          echo "HALLEY_CLI=$GITHUB_WORKSPACE/cli/target/release/halley" >> "$GITHUB_ENV"
+
+      # ── Python shim ───────────────────────────────────────────────────────
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: sdk-py/pyproject.toml
+
+      - name: Install halley Python shim
+        run: |
+          pip install --quiet -e sdk-py/
+          echo "HALLEY_SDK_PY_PATH=$GITHUB_WORKSPACE/sdk-py" >> "$GITHUB_ENV"
+
+      - name: Install agent dependencies (for replay)
+        working-directory: examples/reasoning-agent-python
+        run: |
+          pip install --quiet openai
+          # Traceloop is not needed for pure-mode replay; skip to keep CI fast.
+
+      # ── Run halley ci ─────────────────────────────────────────────────────
+      - name: Run halley ci (pure mode, $0)
+        id: halley_ci
+        working-directory: examples/replay-target
+        env:
+          # Pure replay never makes live calls; dummy key satisfies OpenAI SDK
+          # credential check at construction time.
+          OPENAI_API_KEY: sk-halley-ci-noop
+        run: |
+          set +e
+          "$HALLEY_CLI" ci \
+            --junit "$GITHUB_WORKSPACE/halley-results.xml" \
+            2>&1 | tee halley-ci-output.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      # ── Publish test results ──────────────────────────────────────────────
+      - name: Publish JUnit test results
+        uses: EnricoMi/publish-unit-test-result-action@v2
+        if: always()
+        with:
+          files: halley-results.xml
+          comment_title: "Halley Fixture Replay Results"
+          comment_mode: always
+          check_name: "Halley CI"
+
+      # ── Diff hint on failure ──────────────────────────────────────────────
+      - name: Print diff hint on failure
+        if: steps.halley_ci.outputs.exit_code != '0'
+        working-directory: examples/replay-target
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY || 'sk-not-set' }}
+        run: |
+          echo "::error title=Halley CI failed::One or more fixture invariants failed. See details below."
+          echo ""
+          echo "── Failure summary ──────────────────────────────────────────"
+          grep -E "FAIL|MISS|error" examples/replay-target/halley-ci-output.txt 2>/dev/null || true
+          echo ""
+          echo "── Suggested next steps ─────────────────────────────────────"
+          echo "  # Show what changed between recorded baseline and this run:"
+          echo "  halley diff reasoning-agent-math"
+          echo ""
+          echo "  # Find the commit that introduced the regression:"
+          echo "  halley bisect reasoning-agent-math"
+          echo ""
+          echo "  # Re-record the fixture if the change is intentional:"
+          echo "  halley record"
+        continue-on-error: true
+
+      - name: Post failure comment on PR
+        if: |
+          steps.halley_ci.outputs.exit_code != '0' &&
+          github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let output = '';
+            try {
+              output = fs.readFileSync('examples/replay-target/halley-ci-output.txt', 'utf8');
+            } catch {}
+            const failLines = output.split('\n')
+              .filter(l => l.includes('FAIL') || l.includes('MISS'))
+              .slice(0, 20)
+              .join('\n');
+            const body = [
+              '## ❌ Halley CI failed',
+              '',
+              'One or more fixture invariants did not pass in pure-mode replay.',
+              '',
+              '```',
+              failLines || '(no details — see workflow log)',
+              '```',
+              '',
+              '**To investigate:**',
+              '```bash',
+              '# Show human-readable drift between baseline and this run:',
+              'halley diff reasoning-agent-math',
+              '',
+              '# Binary-search for the regression commit:',
+              'halley bisect reasoning-agent-math',
+              '',
+              '# If the change is intentional, re-record:',
+              'halley record',
+              '```',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      # ── Fail the job if halley ci failed ─────────────────────────────────
+      - name: Fail job on invariant violations
+        if: steps.halley_ci.outputs.exit_code != '0'
+        run: |
+          echo "halley ci exited with code ${{ steps.halley_ci.outputs.exit_code }}"
+          exit 1

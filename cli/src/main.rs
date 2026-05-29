@@ -75,9 +75,17 @@ fn main() -> Result<()> {
             allow_irreversible,
         } => cmd_ci(&cli.config, &cfg, only, &junit, &mode, allow_irreversible),
         Command::Diff { fixture } => cmd_diff(&cli.config, &cfg, &fixture),
-        Command::Bisect { fixture, good, repo } => {
-            cmd_bisect(&cli.config, &cfg, &fixture, good.as_deref(), repo.as_deref())
-        }
+        Command::Bisect {
+            fixture,
+            good,
+            repo,
+        } => cmd_bisect(
+            &cli.config,
+            &cfg,
+            &fixture,
+            good.as_deref(),
+            repo.as_deref(),
+        ),
     }
 }
 
@@ -581,7 +589,9 @@ fn cmd_bisect(
 
     // Determine the target repo directory.
     let repo_dir = if let Some(r) = repo_override {
-        PathBuf::from(r).canonicalize().context("canonicalizing --repo path")?
+        PathBuf::from(r)
+            .canonicalize()
+            .context("canonicalizing --repo path")?
     } else {
         paths.config_dir.clone()
     };
@@ -660,10 +670,7 @@ fn cmd_bisect(
         .rev() // now chronological order
         .collect();
 
-    eprintln!(
-        "[halley bisect] search range: {} commits",
-        candidates.len()
-    );
+    eprintln!("[halley bisect] search range: {} commits", candidates.len());
 
     // We know good_commit passes and bad_commit fails.
     // Binary search for the first failing commit.
@@ -673,7 +680,14 @@ fn cmd_bisect(
 
     // Validate boundary assumptions.
     eprintln!("[halley bisect] verifying good commit...");
-    if !test_commit_reliable(&repo_dir, config_path, &candidates[lo].0, fixture_slug, &paths, cfg) {
+    if !test_commit_reliable(
+        &repo_dir,
+        config_path,
+        &candidates[lo].0,
+        fixture_slug,
+        &paths,
+        cfg,
+    ) {
         eprintln!(
             "[halley bisect] WARNING: 'good' commit {} already fails — widening search not supported in v1. Proceeding anyway.",
             &candidates[lo].0[..8]
@@ -685,13 +699,17 @@ fn cmd_bisect(
     while lo + 1 < hi {
         let mid = (lo + hi) / 2;
         let (hash, subject) = &candidates[mid];
-        eprintln!(
-            "[halley bisect] checking {} ({}) …",
-            &hash[..8],
-            subject
-        );
+        eprintln!("[halley bisect] checking {} ({}) …", &hash[..8], subject);
 
-        let passes = test_commit_reliable_n(&repo_dir, config_path, hash, fixture_slug, &paths, cfg, tries);
+        let passes = test_commit_reliable_n(
+            &repo_dir,
+            config_path,
+            hash,
+            fixture_slug,
+            &paths,
+            cfg,
+            tries,
+        );
         if passes {
             eprintln!("[halley bisect]   → PASS (good)");
             lo = mid;
