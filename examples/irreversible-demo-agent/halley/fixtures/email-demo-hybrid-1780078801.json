@@ -1,0 +1,126 @@
+{
+  "fixture_format_version": 1,
+  "fixture_id": "b2a58401-da7d-41bd-adb6-aee45044a450",
+  "source_run_id": "3c2fe49d11e84dfdbac0f1170a624838",
+  "run_name": "email-demo (hybrid)",
+  "started_at_ms": 1780078800051,
+  "dialect": "halley-raw",
+  "top_model": "gpt-4o-mini",
+  "written_at": "2026-05-29T18:20:01.144743+00:00",
+  "observations": [
+    {
+      "index": 0,
+      "span_id": "0000000000000000",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1780078800051,
+      "ended_at_ms": 1780078801133,
+      "duration_ms": 1082,
+      "input_tokens": 66,
+      "output_tokens": 26,
+      "match_key": "b7d841cb69c1ee53519eb9252289af1e0113fa3baaaa76e30ce5d5052979e267",
+      "input_body_ref": "halley/fixtures/email-demo-hybrid-1780078801/bodies/sha256-b7d841cb69c1ee53519eb9252289af1e0113fa3baaaa76e30ce5d5052979e267.json",
+      "output_body_ref": "halley/fixtures/email-demo-hybrid-1780078801/bodies/sha256-ec463c4e664ced74508541326b4543eafce7bcb113ccb99770229be482fad965.json"
+    }
+  ],
+  "invariants": {
+    "structural": {
+      "span_count": 1,
+      "operation_sequence": [
+        "chat"
+      ],
+      "required_operations": [
+        "chat"
+      ],
+      "parent_index": [
+        null
+      ]
+    },
+    "schema": {
+      "per_span": [
+        {
+          "op": "chat",
+          "key_types": {
+            "id": "string",
+            "object": "string",
+            "created": "number",
+            "model": "string",
+            "choices": "array",
+            "choices[].index": "number",
+            "choices[].message.role": "string",
+            "choices[].message.content": "null",
+            "choices[].message.tool_calls": "array",
+            "choices[].message.tool_calls[].id": "string",
+            "choices[].message.tool_calls[].type": "string",
+            "choices[].message.tool_calls[].function.name": "string",
+            "choices[].message.tool_calls[].function.arguments": "string",
+            "choices[].message.refusal": "null",
+            "choices[].message.annotations": "array",
+            "choices[].logprobs": "null",
+            "choices[].finish_reason": "string",
+            "usage.prompt_tokens": "number",
+            "usage.completion_tokens": "number",
+            "usage.total_tokens": "number",
+            "usage.prompt_tokens_details.cached_tokens": "number",
+            "usage.prompt_tokens_details.audio_tokens": "number",
+            "usage.completion_tokens_details.reasoning_tokens": "number",
+            "usage.completion_tokens_details.audio_tokens": "number",
+            "usage.completion_tokens_details.accepted_prediction_tokens": "number",
+            "usage.completion_tokens_details.rejected_prediction_tokens": "number",
+            "service_tier": "string",
+            "system_fingerprint": "string"
+          },
+          "required_keys": [
+            "id",
+            "object",
+            "created",
+            "model",
+            "choices",
+            "choices[].index",
+            "choices[].message.role",
+            "choices[].message.content",
+            "choices[].message.tool_calls",
+            "choices[].message.tool_calls[].id",
+            "choices[].message.tool_calls[].type",
+            "choices[].message.tool_calls[].function.name",
+            "choices[].message.tool_calls[].function.arguments",
+            "choices[].message.refusal",
+            "choices[].message.annotations",
+            "choices[].logprobs",
+            "choices[].finish_reason",
+            "usage.prompt_tokens",
+            "usage.completion_tokens",
+            "usage.total_tokens",
+            "usage.prompt_tokens_details.cached_tokens",
+            "usage.prompt_tokens_details.audio_tokens",
+            "usage.completion_tokens_details.reasoning_tokens",
+            "usage.completion_tokens_details.audio_tokens",
+            "usage.completion_tokens_details.accepted_prediction_tokens",
+            "usage.completion_tokens_details.rejected_prediction_tokens",
+            "service_tier",
+            "system_fingerprint"
+          ]
+        }
+      ]
+    },
+    "metric": {
+      "cost_max_usd": 3.06e-05,
+      "latency_max_ms": 1298,
+      "span_count": 1,
+      "input_tokens_max": 80,
+      "output_tokens_max": 32
+    },
+    "semantic": {
+      "enabled": false,
+      "judge_model": null,
+      "rubric": null
+    }
+  },
+  "replay_matching": {
+    "strategy": "input_body_hash_v1",
+    "description": "The replay shim computes SHA-256 of the D22 canonical JSON of the incoming request body against each observation's match_key. Matching is ordinal: repeated identical match_keys are consumed in index order via a per-key cursor. On hit the shim serves its recorded output_body_ref."
+  }
+}

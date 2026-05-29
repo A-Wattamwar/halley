@@ -1,0 +1,20 @@
+{
+  "agent": {
+    "command": ["/Users/a-wattamwar/development/halley/examples/reasoning-agent-python/.venv/bin/python", "agent.py"],
+    "cwd": ".",
+    "fixture_slug": "email-demo"
+  },
+  "shim": {
+    "provider": "openai",
+    "replay_env_var": "HALLEY_MODE"
+  },
+  "fixtures_dir": "halley/fixtures",
+  "tools": [
+    { "name": "send_email", "irreversible": true },
+    { "name": "read_file", "irreversible": false }
+  ],
+  "replay": {
+    "mode": "pure",
+    "headroom": 1.2
+  }
+}

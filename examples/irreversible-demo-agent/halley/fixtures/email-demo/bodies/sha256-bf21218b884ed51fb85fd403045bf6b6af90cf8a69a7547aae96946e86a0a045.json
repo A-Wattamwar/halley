@@ -1,0 +1,46 @@
+{
+  "id": "chatcmpl-Dkw5oxcy4YZR9grOSrGB59XTqVKpZ",
+  "object": "chat.completion",
+  "created": 1780078768,
+  "model": "gpt-4o-mini-2024-07-18",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_TsExwQNGiYakmglBGot7zkX4",
+            "type": "function",
+            "function": {
+              "name": "send_email",
+              "arguments": "{\"to\":\"alice@example.com\",\"subject\":\"Hello\",\"body\":\"Hi Alice!\"}"
+            }
+          }
+        ],
+        "refusal": null,
+        "annotations": []
+      },
+      "logprobs": null,
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 74,
+    "completion_tokens": 26,
+    "total_tokens": 100,
+    "prompt_tokens_details": {
+      "cached_tokens": 0,
+      "audio_tokens": 0
+    },
+    "completion_tokens_details": {
+      "reasoning_tokens": 0,
+      "audio_tokens": 0,
+      "accepted_prediction_tokens": 0,
+      "rejected_prediction_tokens": 0
+    }
+  },
+  "service_tier": "default",
+  "system_fingerprint": "fp_dc5460657f"
+}

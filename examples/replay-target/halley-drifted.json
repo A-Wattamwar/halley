@@ -1,6 +1,6 @@
 {
   "agent": {
-    "command": [".venv/bin/python", "agent.py", "Solve: 47 * 23 + 19"],
+    "command": [".venv/bin/python", "agent.py", "Solve: 47 * 23 + 20"],
     "cwd": "../reasoning-agent-python",
     "fixture_slug": "reasoning-agent-math"
   },
@@ -11,7 +11,7 @@
   "fixtures_dir": "../replay-target/halley/fixtures",
   "tools": [],
   "replay": {
-    "mode": "pure",
+    "mode": "hybrid",
     "headroom": 1.2
   }
 }

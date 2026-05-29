@@ -1,12 +1,12 @@
 {
   "fixture_format_version": 1,
-  "fixture_id": "1b5051c9-502f-40f8-8046-6ae23846ecfb",
-  "source_run_id": "a771f37546244684a38e9ddea20206e4",
-  "run_name": "reasoning-agent-math",
-  "started_at_ms": 1780078157430,
+  "fixture_id": "551e4f02-7c46-439d-b19e-7a379535d65f",
+  "source_run_id": "3af59bc717d94cf098afe4d8c52c6b35",
+  "run_name": "reasoning-agent-math-hybrid-1780078510-hybrid-1780078597 (hybrid)",
+  "started_at_ms": 1780078713156,
   "dialect": "halley-raw",
   "top_model": "gpt-4o-mini",
-  "written_at": "2026-05-29T18:09:20.734328+00:00",
+  "written_at": "2026-05-29T18:18:38.305195+00:00",
   "observations": [
     {
       "index": 0,
@@ -16,14 +16,14 @@
       "model": "gpt-4o-mini",
       "system": "openai",
       "status": "ok",
-      "started_at_ms": 1780078157430,
-      "ended_at_ms": 1780078158482,
-      "duration_ms": 1052,
-      "input_tokens": 123,
+      "started_at_ms": 1780078713156,
+      "ended_at_ms": 1780078714023,
+      "duration_ms": 867,
+      "input_tokens": 120,
       "output_tokens": 1,
-      "match_key": "006959f34df0e7ce4a5619cad0f2acad74e84d3ccdf55f8b42d9a7e9e2cdac83",
-      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-006959f34df0e7ce4a5619cad0f2acad74e84d3ccdf55f8b42d9a7e9e2cdac83.json",
-      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-28a47ec81e6262f5b044b5c6553238e1ec55ad4b3d5c008ec81c66b7d126ff3e.json"
+      "match_key": "2d28008c5325d3a3dbddbcc411411bd52350fac29cbb556e769871a7cc748d15",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-2d28008c5325d3a3dbddbcc411411bd52350fac29cbb556e769871a7cc748d15.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-e868d0611b29192a412befc9ee9cbe4ae6ca520ac97b9c2e93df22ae7f9cfb44.json"
     },
     {
       "index": 1,
@@ -33,14 +33,14 @@
       "model": "gpt-4o-mini",
       "system": "openai",
       "status": "ok",
-      "started_at_ms": 1780078158497,
-      "ended_at_ms": 1780078159092,
-      "duration_ms": 595,
-      "input_tokens": 64,
-      "output_tokens": 10,
-      "match_key": "cf3c92f5005548cc08b8154c62af70e3870d36c2497a9440e810117e13e91882",
-      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-cf3c92f5005548cc08b8154c62af70e3870d36c2497a9440e810117e13e91882.json",
-      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-d214f1a35258461ec470d3a8a9b3f6805099dd94490330d9411706b7182b2dd7.json"
+      "started_at_ms": 1780078714040,
+      "ended_at_ms": 1780078714435,
+      "duration_ms": 395,
+      "input_tokens": 28,
+      "output_tokens": 2,
+      "match_key": "7c103a5c40b5527d6b521a426e79d84a2db69b20b245155151852dd9a1a6af1d",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-7c103a5c40b5527d6b521a426e79d84a2db69b20b245155151852dd9a1a6af1d.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-bfd8b2272a18beb14b7238a0764f3233066495e258a0f4393800826ecb4343aa.json"
     },
     {
       "index": 2,
@@ -50,14 +50,14 @@
       "model": "gpt-4o-mini",
       "system": "openai",
       "status": "ok",
-      "started_at_ms": 1780078159094,
-      "ended_at_ms": 1780078159531,
-      "duration_ms": 437,
-      "input_tokens": 30,
-      "output_tokens": 3,
-      "match_key": "0cec675666bfebd2ce6e1ea21c178430da53b633b67517645a6eddc036604bb6",
-      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-0cec675666bfebd2ce6e1ea21c178430da53b633b67517645a6eddc036604bb6.json",
-      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-479fc33f4f9773ceb5fa65896cad31ef58736f3af60d2576d3fb1852013616df.json"
+      "started_at_ms": 1780078714440,
+      "ended_at_ms": 1780078714922,
+      "duration_ms": 482,
+      "input_tokens": 28,
+      "output_tokens": 2,
+      "match_key": "5b192138c3c7f6e1fcb647c98da7a981bf54ed4151f6755fd51b8d9a0ebbbcf7",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-5b192138c3c7f6e1fcb647c98da7a981bf54ed4151f6755fd51b8d9a0ebbbcf7.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-d9bafbb447e41444e7b20c14e5718a4480ca8bdc506e59c9f933fed43bb7aae1.json"
     },
     {
       "index": 3,
@@ -67,14 +67,14 @@
       "model": "gpt-4o-mini",
       "system": "openai",
       "status": "ok",
-      "started_at_ms": 1780078159535,
-      "ended_at_ms": 1780078160218,
-      "duration_ms": 683,
-      "input_tokens": 30,
-      "output_tokens": 3,
-      "match_key": "a2bc1ced30fec00fe8b1f65847acaacc41af153b8dc5b71c3e06675e9b7abf72",
-      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-a2bc1ced30fec00fe8b1f65847acaacc41af153b8dc5b71c3e06675e9b7abf72.json",
-      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-69ca12d86e74f1e508c6902a4e73154d2fec1c48a673b454c9f2341d374a5191.json"
+      "started_at_ms": 1780078714925,
+      "ended_at_ms": 1780078715269,
+      "duration_ms": 344,
+      "input_tokens": 28,
+      "output_tokens": 2,
+      "match_key": "5b192138c3c7f6e1fcb647c98da7a981bf54ed4151f6755fd51b8d9a0ebbbcf7",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-5b192138c3c7f6e1fcb647c98da7a981bf54ed4151f6755fd51b8d9a0ebbbcf7.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-2d63c69be3ff7f80b9a8efa983a4960e68b7bc7a10a48a2ef8aeefe5b2df9877.json"
     },
     {
       "index": 4,
@@ -84,20 +84,38 @@
       "model": "gpt-4o-mini",
       "system": "openai",
       "status": "ok",
-      "started_at_ms": 1780078160221,
-      "ended_at_ms": 1780078160732,
-      "duration_ms": 511,
+      "started_at_ms": 1780078715273,
+      "ended_at_ms": 1780078717698,
+      "duration_ms": 2425,
       "input_tokens": 30,
-      "output_tokens": 3,
-      "match_key": "a2bc1ced30fec00fe8b1f65847acaacc41af153b8dc5b71c3e06675e9b7abf72",
-      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-a2bc1ced30fec00fe8b1f65847acaacc41af153b8dc5b71c3e06675e9b7abf72.json",
-      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-75049a79b9d3e0055e5a8c8ca1d185381c40e90eef934e4e0f294df59eefbf75.json"
+      "output_tokens": 167,
+      "match_key": "f99ae6ebc2e003e8cd9f9bb9993ac7a908bcdbb8d27081c172aa099b29b19ea5",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-f99ae6ebc2e003e8cd9f9bb9993ac7a908bcdbb8d27081c172aa099b29b19ea5.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-cd531e10cf3544928d8b28eacdffcbe8bc6cb13a95ff567dae6ad105f9f6d2a6.json"
+    },
+    {
+      "index": 5,
+      "span_id": "0000000000000005",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1780078717703,
+      "ended_at_ms": 1780078718302,
+      "duration_ms": 599,
+      "input_tokens": 62,
+      "output_tokens": 1,
+      "match_key": "e841273f854490c4b125a4d42f13de8f625b66ed9b27c025ec4b43651509a874",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-e841273f854490c4b125a4d42f13de8f625b66ed9b27c025ec4b43651509a874.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math-hybrid-1780078510-hybrid-1780078597-hybrid-1780078718/bodies/sha256-44d7973959bff0a372e43ea4da6012c5217fcd11e9db61cbcbd8a4416ba0fd1e.json"
     }
   ],
   "invariants": {
     "structural": {
-      "span_count": 5,
+      "span_count": 6,
       "operation_sequence": [
+        "chat",
         "chat",
         "chat",
         "chat",
@@ -108,6 +126,7 @@
         "chat"
       ],
       "parent_index": [
+        null,
         null,
         null,
         null,
@@ -381,15 +400,68 @@
             "service_tier",
             "system_fingerprint"
           ]
+        },
+        {
+          "op": "chat",
+          "key_types": {
+            "id": "string",
+            "object": "string",
+            "created": "number",
+            "model": "string",
+            "choices": "array",
+            "choices[].index": "number",
+            "choices[].message.role": "string",
+            "choices[].message.content": "string",
+            "choices[].message.refusal": "null",
+            "choices[].message.annotations": "array",
+            "choices[].logprobs": "null",
+            "choices[].finish_reason": "string",
+            "usage.prompt_tokens": "number",
+            "usage.completion_tokens": "number",
+            "usage.total_tokens": "number",
+            "usage.prompt_tokens_details.cached_tokens": "number",
+            "usage.prompt_tokens_details.audio_tokens": "number",
+            "usage.completion_tokens_details.reasoning_tokens": "number",
+            "usage.completion_tokens_details.audio_tokens": "number",
+            "usage.completion_tokens_details.accepted_prediction_tokens": "number",
+            "usage.completion_tokens_details.rejected_prediction_tokens": "number",
+            "service_tier": "string",
+            "system_fingerprint": "string"
+          },
+          "required_keys": [
+            "id",
+            "object",
+            "created",
+            "model",
+            "choices",
+            "choices[].index",
+            "choices[].message.role",
+            "choices[].message.content",
+            "choices[].message.refusal",
+            "choices[].message.annotations",
+            "choices[].logprobs",
+            "choices[].finish_reason",
+            "usage.prompt_tokens",
+            "usage.completion_tokens",
+            "usage.total_tokens",
+            "usage.prompt_tokens_details.cached_tokens",
+            "usage.prompt_tokens_details.audio_tokens",
+            "usage.completion_tokens_details.reasoning_tokens",
+            "usage.completion_tokens_details.audio_tokens",
+            "usage.completion_tokens_details.accepted_prediction_tokens",
+            "usage.completion_tokens_details.rejected_prediction_tokens",
+            "service_tier",
+            "system_fingerprint"
+          ]
         }
       ]
     },
     "metric": {
-      "cost_max_usd": 6.426e-05,
-      "latency_max_ms": 3962,
-      "span_count": 5,
-      "input_tokens_max": 333,
-      "output_tokens_max": 25
+      "cost_max_usd": 0.00017928,
+      "latency_max_ms": 6175,
+      "span_count": 6,
+      "input_tokens_max": 356,
+      "output_tokens_max": 211
     },
     "semantic": {
       "enabled": false,

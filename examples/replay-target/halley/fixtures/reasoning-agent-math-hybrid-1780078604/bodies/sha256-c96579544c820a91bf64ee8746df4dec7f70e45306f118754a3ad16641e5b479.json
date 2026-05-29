@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a question classifier. Reply with exactly one word."
+    },
+    {
+      "role": "user",
+      "content": "Classify this question into ONE category:\n- math: calculations, numbers, arithmetic, algebra, geometry\n- coding: write code, function, program, algorithm\n- planning: sequence of actions, steps, moves, logistics\n- future: predictions, forecasts, future events\n- general: factual questions, reading comprehension, common sense, multiple choice\n\nQuestion: Is 42 the answer to life, the universe, and everything?\n\nReply with exactly one word: math, coding, planning, future, or general"
+    }
+  ],
+  "model": "gpt-4o-mini",
+  "max_tokens": 1024,
+  "temperature": 0.0
+}

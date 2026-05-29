@@ -1,0 +1,15 @@
+{
+  "messages": [
+    {
+      "role": "system",
+      "content": "Reply YES or NO only."
+    },
+    {
+      "role": "user",
+      "content": "Is this answer correct? Answer YES or NO only.\nQuestion: Is 42 the answer to life, the universe, and everything?\nAnswer: Yes, in a humorous and fictional context, 42 is considered the answer to life, the universe, and everything, but it lacks real meaning without the corresponding question."
+    }
+  ],
+  "model": "gpt-4o-mini",
+  "max_tokens": 1024,
+  "temperature": 0.0
+}

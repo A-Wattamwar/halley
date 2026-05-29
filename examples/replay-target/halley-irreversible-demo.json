@@ -1,6 +1,6 @@
 {
   "agent": {
-    "command": [".venv/bin/python", "agent.py", "Solve: 47 * 23 + 19"],
+    "command": [".venv/bin/python", "agent.py", "Is 42 the answer to life?"],
     "cwd": "../reasoning-agent-python",
     "fixture_slug": "reasoning-agent-math"
   },
@@ -9,9 +9,12 @@
     "replay_env_var": "HALLEY_MODE"
   },
   "fixtures_dir": "../replay-target/halley/fixtures",
-  "tools": [],
+  "tools": [
+    { "name": "send_email", "irreversible": true },
+    { "name": "calculator", "irreversible": false }
+  ],
   "replay": {
-    "mode": "pure",
+    "mode": "hybrid",
     "headroom": 1.2
   }
 }
