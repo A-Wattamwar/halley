@@ -22,6 +22,7 @@ import { SpanInspector } from "./SpanInspector";
 import { SpanGraphWrapper } from "./SpanGraphWrapper";
 import { SpanBarLink } from "./SpanBarLink";
 import { LiveSpansIsland } from "./LiveSpansIsland";
+import { TurnIntoTestButton } from "./TurnIntoTestButton";
 import { getSessionProjectId } from "@/lib/session";
 
 export const dynamic = "force-dynamic";
@@ -229,8 +230,8 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
             </span>
           </div>
 
-          {/* Status + dialect badges */}
-          <div className="mt-3 flex items-center gap-2">
+          {/* Status + dialect badges + actions */}
+          <div className="mt-3 flex items-center gap-2 flex-wrap">
             <StatusBadge status={scopedRun.worst_status} />
             <DialectBadge dialect={scopedRun.top_dialect} />
             {scopedRun.top_model && (
@@ -238,6 +239,13 @@ export default async function RunDetailPage({ params, searchParams }: PageProps)
                 {shortModel(scopedRun.top_model)}
               </span>
             )}
+            {/* Day 2: "Turn this run into a test" — client island, D-11 intact */}
+            <span className="ml-auto">
+              <TurnIntoTestButton
+                runId={runId}
+                runName={scopedRun.run_name ?? ""}
+              />
+            </span>
           </div>
         </div>
 
