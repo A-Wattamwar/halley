@@ -177,6 +177,28 @@ services:
       retries: 10
       start_period: 30s
 
+  # ---------- Worker (Phase 5 Week 9) ----------
+  # BullMQ background worker for invariant inference and bisect jobs.
+  # D-18: BullMQ uses prefix "halley:worker:" — does NOT touch
+  # halley:spans / halley:writers / halley:live:* (ingester keys).
+  # D-21: Docker rebuild at most once per day it changes.
+  worker:
+    build:
+      context: ./worker
+    container_name: halley-worker
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Inside the container Postgres is at the compose service name on port 5432.
+      POSTGRES_URL: "postgres://${POSTGRES_USER:-halley}:${POSTGRES_PASSWORD:-halley}@postgres:5432/${POSTGRES_DB:-halley}"
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
 volumes:
   clickhouse-data:
   clickhouse-logs:
