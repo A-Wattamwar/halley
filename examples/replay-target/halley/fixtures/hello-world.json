@@ -1,0 +1,156 @@
+{
+  "fixture_format_version": 1,
+  "fixture_id": "0ed5ed22-7906-4bed-a71b-74021d4533e3",
+  "source_run_id": "00000000000000000000000000000001",
+  "run_name": "hello-world",
+  "started_at_ms": 1778655600000,
+  "dialect": "halley-raw",
+  "top_model": "gpt-4o-mini",
+  "written_at": "2026-05-29T16:54:12.115Z",
+  "observations": [
+    {
+      "index": 0,
+      "span_id": "0000000000000001",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1778655600000,
+      "ended_at_ms": 1778655601500,
+      "duration_ms": 1500,
+      "input_tokens": 12,
+      "output_tokens": 30,
+      "match_key": "483BC0874DE4E0B6C4DABDC4B00615B51084F2739ADBB96F6D8D071C503778E3",
+      "input_body_ref": "halley/fixtures/hello-world/bodies/sha256-483bc0874de4e0b6c4dabdc4b00615b51084f2739adbb96f6d8d071c503778e3.json",
+      "output_body_ref": "halley/fixtures/hello-world/bodies/sha256-9c3a9d81d6463b2f54684c9a5571d51f5833ad11a8b9e793b0365b39e16337c6.json"
+    },
+    {
+      "index": 1,
+      "span_id": "0000000000000001",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1778655600000,
+      "ended_at_ms": 1778655601500,
+      "duration_ms": 1500,
+      "input_tokens": 12,
+      "output_tokens": 30,
+      "match_key": "483BC0874DE4E0B6C4DABDC4B00615B51084F2739ADBB96F6D8D071C503778E3",
+      "input_body_ref": "halley/fixtures/hello-world/bodies/sha256-483bc0874de4e0b6c4dabdc4b00615b51084f2739adbb96f6d8d071c503778e3.json",
+      "output_body_ref": "halley/fixtures/hello-world/bodies/sha256-9c3a9d81d6463b2f54684c9a5571d51f5833ad11a8b9e793b0365b39e16337c6.json"
+    },
+    {
+      "index": 2,
+      "span_id": "0000000000000001",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1778655600000,
+      "ended_at_ms": 1778655601500,
+      "duration_ms": 1500,
+      "input_tokens": 12,
+      "output_tokens": 30,
+      "match_key": "483BC0874DE4E0B6C4DABDC4B00615B51084F2739ADBB96F6D8D071C503778E3",
+      "input_body_ref": "halley/fixtures/hello-world/bodies/sha256-483bc0874de4e0b6c4dabdc4b00615b51084f2739adbb96f6d8d071c503778e3.json",
+      "output_body_ref": "halley/fixtures/hello-world/bodies/sha256-9c3a9d81d6463b2f54684c9a5571d51f5833ad11a8b9e793b0365b39e16337c6.json"
+    },
+    {
+      "index": 3,
+      "span_id": "0000000000000001",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1778655600000,
+      "ended_at_ms": 1778655601500,
+      "duration_ms": 1500,
+      "input_tokens": 12,
+      "output_tokens": 30,
+      "match_key": "483BC0874DE4E0B6C4DABDC4B00615B51084F2739ADBB96F6D8D071C503778E3",
+      "input_body_ref": "halley/fixtures/hello-world/bodies/sha256-483bc0874de4e0b6c4dabdc4b00615b51084f2739adbb96f6d8d071c503778e3.json",
+      "output_body_ref": "halley/fixtures/hello-world/bodies/sha256-9c3a9d81d6463b2f54684c9a5571d51f5833ad11a8b9e793b0365b39e16337c6.json"
+    }
+  ],
+  "invariants": {
+    "metric": {
+      "span_count": 4,
+      "cost_max_usd": 0.00009504,
+      "latency_max_ms": 1800,
+      "input_tokens_max": 58,
+      "output_tokens_max": 144
+    },
+    "schema": {
+      "per_span": [
+        {
+          "op": "chat",
+          "key_types": {
+            "content": "string"
+          },
+          "required_keys": [
+            "content"
+          ]
+        },
+        {
+          "op": "chat",
+          "key_types": {
+            "content": "string"
+          },
+          "required_keys": [
+            "content"
+          ]
+        },
+        {
+          "op": "chat",
+          "key_types": {
+            "content": "string"
+          },
+          "required_keys": [
+            "content"
+          ]
+        },
+        {
+          "op": "chat",
+          "key_types": {
+            "content": "string"
+          },
+          "required_keys": [
+            "content"
+          ]
+        }
+      ]
+    },
+    "semantic": {
+      "rubric": null,
+      "enabled": false,
+      "judge_model": null
+    },
+    "structural": {
+      "span_count": 4,
+      "parent_index": [
+        null,
+        null,
+        null,
+        null
+      ],
+      "operation_sequence": [
+        "chat",
+        "chat",
+        "chat",
+        "chat"
+      ],
+      "required_operations": [
+        "chat"
+      ]
+    }
+  },
+  "replay_matching": {
+    "strategy": "input_body_hash_v1",
+    "description": "Match incoming replay requests by comparing the D22 canonical-JSON SHA-256 of the request body against each observation's match_key. The matcher (Week 10 cli/shim) looks up the matching observation and serves its recorded output_body_ref. match_key = hex(SHA-256(canonical_json(input_body)))."
+  }
+}

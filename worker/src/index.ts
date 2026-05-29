@@ -5,7 +5,7 @@
  * backing connections on startup, and registers SIGINT/SIGTERM handlers for
  * graceful shutdown.
  *
- * D-18: BullMQ queue/prefix = "halley:worker:" — does NOT touch
+ * D-18: BullMQ queue/prefix = "halley:worker" — does NOT touch
  * halley:spans / halley:writers / halley:live:* (ingester keys).
  */
 
@@ -13,13 +13,19 @@ import { Worker } from "bullmq";
 import { verifyConnections, getRedis, getPool } from "./connections.js";
 import { processInvariantInfer } from "./jobs/invariant-infer.js";
 import type { InvariantInferJobData } from "./jobs/invariant-infer.js";
+import { processFixtureWrite } from "./jobs/fixture-write.js";
+import type { FixtureWriteJobData } from "./jobs/fixture-write.js";
 
-const QUEUE_NAME = "invariant.infer";
+const INFER_QUEUE = "invariant.infer";
+const WRITE_QUEUE = "fixture.write";
 
-// BullMQ connection options — reuse the shared Redis singleton.
-// lazyConnect: false is already set in getRedis(); BullMQ requires
-// maxRetriesPerRequest: null (already set in getRedis()).
-const connectionOpts = { connection: getRedis() };
+// Shared BullMQ options — reuse the Redis singleton.
+// maxRetriesPerRequest: null is required by BullMQ (set in getRedis()).
+// D-18: prefix "halley:worker" isolates BullMQ from ingester key namespace.
+const workerOpts = {
+  connection: getRedis(),
+  prefix: "halley:worker",
+};
 
 async function main() {
   console.log("[halley-worker] starting up…");
@@ -30,36 +36,40 @@ async function main() {
   // ── Register job processors ────────────────────────────────────────────────
 
   const inferWorker = new Worker<InvariantInferJobData>(
-    QUEUE_NAME,
-    async (job) => {
-      await processInvariantInfer(job);
-    },
-    {
-      ...connectionOpts,
-      concurrency: 2,
-      // D-18: custom prefix keeps BullMQ off the ingester's key namespace.
-      prefix: "halley:worker",
-    }
+    INFER_QUEUE,
+    async (job) => { await processInvariantInfer(job); },
+    { ...workerOpts, concurrency: 2 }
+  );
+  inferWorker.on("completed", (job) =>
+    console.log(`[${INFER_QUEUE}] completed  job_id=${job.id}`)
+  );
+  inferWorker.on("failed", (job, err) =>
+    console.error(`[${INFER_QUEUE}] failed     job_id=${job?.id}  error=${err.message}`)
   );
 
-  inferWorker.on("completed", (job) => {
-    console.log(`[${QUEUE_NAME}] completed  job_id=${job.id}`);
-  });
-  inferWorker.on("failed", (job, err) => {
-    console.error(`[${QUEUE_NAME}] failed     job_id=${job?.id}  error=${err.message}`);
-  });
+  const writeWorker = new Worker<FixtureWriteJobData>(
+    WRITE_QUEUE,
+    async (job) => { await processFixtureWrite(job); },
+    { ...workerOpts, concurrency: 1 }
+  );
+  writeWorker.on("completed", (job) =>
+    console.log(`[${WRITE_QUEUE}] completed  job_id=${job.id}`)
+  );
+  writeWorker.on("failed", (job, err) =>
+    console.error(`[${WRITE_QUEUE}] failed     job_id=${job?.id}  error=${err.message}`)
+  );
 
-  console.log(`[halley-worker] listening on queue "${QUEUE_NAME}"`);
+  console.log(
+    `[halley-worker] listening on queues "${INFER_QUEUE}", "${WRITE_QUEUE}"`
+  );
 
   // ── Graceful shutdown ──────────────────────────────────────────────────────
 
   async function shutdown(signal: string) {
     console.log(`[halley-worker] ${signal} received — draining workers…`);
-    await inferWorker.close();
-    const redis = getRedis();
-    redis.disconnect();
-    const pool = getPool();
-    await pool.end();
+    await Promise.all([inferWorker.close(), writeWorker.close()]);
+    getRedis().disconnect();
+    await getPool().end();
     console.log("[halley-worker] shutdown complete");
     process.exit(0);
   }

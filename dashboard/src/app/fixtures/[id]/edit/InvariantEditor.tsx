@@ -493,6 +493,29 @@ export function InvariantEditor({ fixtureId, initialInvariants }: Props) {
   >("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
+  const [writeState, setWriteState] = useState<
+    "idle" | "enqueuing" | "queued" | "error"
+  >("idle");
+  const [writeError, setWriteError] = useState("");
+
+  async function handleWrite() {
+    setWriteState("enqueuing");
+    setWriteError("");
+    try {
+      const res = await fetch(`/api/fixtures/${fixtureId}/save`, {
+        method: "POST",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error((data as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      setWriteState("queued");
+    } catch (err) {
+      setWriteError(err instanceof Error ? err.message : String(err));
+      setWriteState("error");
+    }
+  }
+
   async function handleSave() {
     setSaveState("saving");
     setErrorMsg("");
@@ -563,29 +586,68 @@ export function InvariantEditor({ fixtureId, initialInvariants }: Props) {
       {/* Semantic */}
       {inv.semantic && <SemanticSection data={inv.semantic} />}
 
-      {/* Save bar */}
+      {/* Action bar */}
       <div className="mt-6 flex items-center justify-between gap-4 py-4 border-t border-gray-800">
-        <p className="text-xs text-gray-600">
-          Status stays <span className="font-mono text-amber-500">proposing</span> until the
-          fixture is written to the repo (Day 4).
-        </p>
+        <div className="space-y-1">
+          <p className="text-xs text-gray-600">
+            <span className="font-semibold text-gray-400">Save invariants</span>
+            {" — "}updates the edits above in Postgres (status stays{" "}
+            <span className="font-mono text-amber-500">proposing</span>).
+          </p>
+          <p className="text-xs text-gray-600">
+            <span className="font-semibold text-gray-400">Write to repo</span>
+            {" — "}writes fixture files to the local repo and sets status to{" "}
+            <span className="font-mono text-green-500">ready</span>.
+          </p>
+        </div>
+
         <div className="flex items-center gap-3">
+          {/* Errors */}
           {saveState === "error" && (
             <span className="text-xs text-red-400">{errorMsg}</span>
           )}
-          {saveState === "saved" && (
-            <span className="text-xs text-green-400">Saved</span>
+          {writeState === "error" && (
+            <span className="text-xs text-red-400">{writeError}</span>
           )}
+
+          {/* Status indicators */}
+          {saveState === "saved" && (
+            <span className="text-xs text-green-400">Edits saved</span>
+          )}
+          {writeState === "queued" && (
+            <span className="text-xs text-green-400">
+              Write job queued — reload to see status update
+            </span>
+          )}
+
+          {/* Save invariants */}
           <button
             onClick={handleSave}
             disabled={saveState === "saving"}
-            className={`px-5 py-2 rounded-lg text-sm font-semibold transition-colors ${
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
               saveState === "saving"
-                ? "bg-gray-700 text-gray-400 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-500 text-white"
+                ? "bg-gray-800 text-gray-500 border-gray-700 cursor-not-allowed"
+                : "bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700"
             }`}
           >
             {saveState === "saving" ? "Saving…" : "Save invariants"}
+          </button>
+
+          {/* Write to repo */}
+          <button
+            onClick={handleWrite}
+            disabled={writeState === "enqueuing" || writeState === "queued"}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
+              writeState === "enqueuing" || writeState === "queued"
+                ? "bg-violet-900 text-violet-400 cursor-not-allowed"
+                : "bg-violet-600 hover:bg-violet-500 text-white"
+            }`}
+          >
+            {writeState === "enqueuing"
+              ? "Enqueuing…"
+              : writeState === "queued"
+              ? "Queued ✓"
+              : "Write fixture to repo"}
           </button>
         </div>
       </div>

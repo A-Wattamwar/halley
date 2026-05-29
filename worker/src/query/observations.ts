@@ -30,6 +30,12 @@ export interface ObservationRow {
   output_tokens: number;
   attributes: Record<string, string>;
   /**
+   * 64-char uppercase hex SHA-256 of the INPUT body (request).
+   * Empty string when the span has no recorded input body.
+   * Used as the v1 replay match_key (D22 canonical-JSON hash).
+   */
+  input_body_hash: string;
+  /**
    * 64-char uppercase hex of the SHA-256 output body hash.
    * Empty string ("") when the span has no recorded output body.
    * Matches the halley.observation_body.body_hash column (FixedString(32)).
@@ -53,6 +59,7 @@ interface RawRow {
   input_tokens: string;
   output_tokens: string;
   attributes: Record<string, string>;
+  input_body_hash: string;
   output_body_hash: string;
 }
 
@@ -85,7 +92,8 @@ export async function loadRunObservations(
           gen_ai_usage_input_tokens            AS input_tokens,
           gen_ai_usage_output_tokens           AS output_tokens,
           attributes,
-          ifNull(hex(output_body_hash), '')    AS output_body_hash
+          ifNull(hex(observations.input_body_hash),  '') AS input_body_hash,
+          ifNull(hex(observations.output_body_hash), '') AS output_body_hash
         FROM halley.observations
         WHERE hex(observations.run_id) = {runId: String}
         ORDER BY start_time ASC
@@ -112,6 +120,7 @@ export async function loadRunObservations(
       input_tokens:     parseInt(r.input_tokens,  10) || 0,
       output_tokens:    parseInt(r.output_tokens, 10) || 0,
       attributes:       r.attributes ?? {},
+      input_body_hash:  r.input_body_hash  ?? "",
       output_body_hash: r.output_body_hash ?? "",
     }));
   } finally {

@@ -1103,10 +1103,79 @@ table-qualified name (`hex(observations.span_id)`,
 resolution and bind to the raw column. Fixed in `halley-query/detail.ts`
 (two WHERE clauses). Applies to every future query module under `halley-query/`.
 
-### D51. Replay interception via a thin per-language in-process shim, not an HTTP proxy.
+### D51. Replay interception: thin per-language in-process shim, not an HTTP proxy.
 
 **D51. Replay interception via a thin per-language in-process shim, not an HTTP proxy.** The Rust `halley` CLI orchestrates replay but delegates interception to a small per-language shim that patches the client/transport layer (Python `httpx`/`requests` first, TS `fetch`/`undici` second — the `vcr-llm` approach). The shim canonicalizes + hashes each provider/tool request (D22), matches the cassette (hit → recorded response, $0; miss → live call recorded as a new version), and shares one cassette format + hash across languages.
 
 **Rationale (researched against the May-2026 state of the art):** the tools shipping this pattern (`vcr-llm`, `pytest-agentcontract`, `agentsnap`, `llm-test-harness`) all intercept in-process, because (1) LLM calls all POST to one URL so URL-based proxy matching fails, (2) a proxy loses SSE streaming frame boundaries — breaking bit-fidelity, and (3) a proxy can't see in-process tool calls — which would gut Halley's "same tools, same order" structural invariant. Interception is not Halley's differentiator (portable in-repo fixtures + `bisect` + tool-effect-safe replay are), so the mechanism is chosen to protect those.
 
 **Tradeoff:** a shim is per-language. Mitigated by shipping Python first (the flagship demo is Python), reusing `sdk-ts/` for TS, and documenting an HTTP-proxy fallback for languages without a shim. Superseded only if a future single-binary interception approach proves equal on streaming + in-process tools.
+
+---
+
+## 2026-05-29 — Phase 5 Week 9 Day 4
+
+### D52. Fixture format v1 and replay-matching spec: LOCKED CONTRACT
+
+**Fixture format v1** (`fixture_format_version: 1`) is the on-disk representation of a Halley regression fixture. Once a fixture file is committed to a user's repo it is immutable from Halley's perspective — the replay shim (Week 10) and the CI runner (Phase 6) read it verbatim. Changing field names or semantics without incrementing `fixture_format_version` is a breaking change.
+
+**On-disk layout:**
+
+```
+halley/fixtures/
+  <slug>.json              # fixture index — the "cassette manifest"
+  <slug>/
+    bodies/
+      sha256-<hash>.json   # one file per unique body (input or output); content-addressed
+```
+
+**`<slug>.json` top-level fields (v1):**
+
+| Field | Type | Description |
+|---|---|---|
+| `fixture_format_version` | `1` | Literal integer 1. Presence = v1 contract; absence = unknown/pre-contract. |
+| `fixture_id` | UUID string | Postgres fixtures.id. Used to match the on-disk file back to the DB row. |
+| `source_run_id` | 32-char hex | The trace/run that was recorded. |
+| `run_name` | string | Human-readable name from the recording session. |
+| `started_at_ms` | integer | Unix epoch ms of the first span's start. |
+| `dialect` | string | OTLP dialect of the source run (`otel-genai`, `openllmetry`, `vercel-ai`, `halley-raw`, …). |
+| `top_model` | string | First non-empty `gen_ai_request_model` in the run. |
+| `written_at` | ISO 8601 UTC | When the fixture writer job ran. |
+| `observations` | array | Ordered span list (execution order, index 0 = first span). |
+| `invariants` | object | Full `invariants_json` as last edited by the user (structural/schema/metric/semantic). |
+| `replay_matching` | object | Replay-matching spec (see below). |
+
+**`observations[i]` fields (v1):**
+
+| Field | Type | Description |
+|---|---|---|
+| `index` | integer | 0-based position in execution order. |
+| `span_id` | 16-char hex | Canonical span ID (upper-case). Changes on every replay — not used as a match key. |
+| `parent_span_id` | 16-char hex | Parent span ID; `"0000000000000000"` = root. |
+| `operation` | string | `gen_ai_operation` (e.g. `chat`, `execute_tool`). |
+| `model` | string | `gen_ai_request_model`. |
+| `system` | string | `gen_ai_system` (e.g. `openai`). |
+| `status` | string | `ok`, `error`, `timeout`. |
+| `started_at_ms` | integer | Unix epoch ms. |
+| `ended_at_ms` | integer | Unix epoch ms. |
+| `duration_ms` | integer | `ended_at_ms - started_at_ms`. |
+| `input_tokens` | integer | Prompt/input token count. |
+| `output_tokens` | integer | Completion/output token count. |
+| `match_key` | 64-char hex | D22 canonical-JSON SHA-256 of the recorded input body. Used by the replay shim to identify which observation to serve. Empty string if no input body was captured. |
+| `input_body_ref` | string \| null | Relative path to the input body file (`halley/fixtures/<slug>/bodies/sha256-<hash>.json`), or null. |
+| `output_body_ref` | string \| null | Relative path to the output body file, or null. |
+
+**`replay_matching` object (v1):**
+
+```json
+{
+  "strategy": "input_body_hash_v1",
+  "description": "..."
+}
+```
+
+Strategy `input_body_hash_v1`: the replay shim (Week 10) intercepts each outgoing LLM call, computes `hex(SHA-256(canonical_json(request_body)))` using the same D22 algorithm that produced the recorded `match_key`, and looks up the matching `observations[i]`. On hit: serve `output_body_ref`. On miss: live call, record new version.
+
+**Body files** (`sha256-<hash>.json`): contain the parsed JSON of the recorded input or output body. Content-addressed by the stored ClickHouse `body_hash` (SHA-256 of the D22 canonical JSON), deduplicated — if two spans share the same body, they reference the same file. The hash is **not recomputed** by the writer; it is reused from `halley.observation_body.body_hash` as stored by the ingester. This is correct because the ingester already applies D22 canonicalization before hashing.
+
+**Rationale:** portable, in-repo, vendor-independent fixtures that travel with the codebase are Halley's core differentiator versus hosted platforms (Braintrust, Langfuse, Patronus). The fixture is a plain JSON file a developer can read, diff, and commit — no proprietary format, no API dependency, no account required to run regression tests. `fixture_format_version` enables non-breaking additions (new top-level keys at v1 are ignored by older tooling) and explicit migration when breaking changes are needed.

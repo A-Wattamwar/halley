@@ -199,6 +199,14 @@ services:
       # In-network: use compose service names and internal ports.
       POSTGRES_URL: "postgres://${POSTGRES_USER:-halley}:${POSTGRES_PASSWORD:-halley}@postgres:5432/${POSTGRES_DB:-halley}"
       REDIS_URL: "redis://redis:6379/0"
+      # Fixture writer target repo (Day 4). Mounted below; the code default
+      # for host runs is ./examples/replay-target (resolved from cwd).
+      HALLEY_FIXTURE_REPO_PATH: "/repo"
+    volumes:
+      # Mount the dev sample repo so the worker can write fixture files.
+      # In production this would be a checked-out user repo or a GitHub App
+      # workspace (Week 10). For dev, examples/replay-target is the stand-in.
+      - ./examples/replay-target:/repo
     depends_on:
       clickhouse:
         condition: service_healthy
