@@ -2,9 +2,10 @@
  * lib/worker-queue.ts — BullMQ producer for the dashboard.
  *
  * The dashboard is a PRODUCER only — it enqueues jobs onto queues that the
- * halley-worker consumes. Currently two queues:
+ * halley-worker consumes. Queues:
  *   - "invariant.infer"  (prefix "halley:worker")
  *   - "fixture.write"    (prefix "halley:worker")
+ *   - "bisect.run"       (prefix "halley:worker")
  *
  * D-18: The dashboard MUST NOT read or write halley:spans, halley:writers,
  * or halley:live:* (ingester keys).
@@ -18,6 +19,7 @@ import { Queue } from "bullmq";
 const BULLMQ_PREFIX  = "halley:worker";
 const INFER_QUEUE    = "invariant.infer";
 const WRITE_QUEUE    = "fixture.write";
+const BISECT_QUEUE   = "bisect.run";
 
 /**
  * Parse redis[s]://[user:password@]host[:port][/db] into BullMQ RedisOptions.
@@ -45,8 +47,9 @@ function parseRedisUrl(url: string): {
 }
 
 // Separate Queue instances for each job type.
-let _inferQueue: Queue | null = null;
-let _writeQueue: Queue | null = null;
+let _inferQueue:  Queue | null = null;
+let _writeQueue:  Queue | null = null;
+let _bisectQueue: Queue | null = null;
 
 function makeQueue(name: string): Queue {
   const redisOpts = parseRedisUrl(
@@ -73,6 +76,11 @@ function getWriteQueue(): Queue {
   return _writeQueue;
 }
 
+function getBisectQueue(): Queue {
+  _bisectQueue ??= makeQueue(BISECT_QUEUE);
+  return _bisectQueue;
+}
+
 // ── Job data types ────────────────────────────────────────────────────────
 
 export interface InvariantInferJobData {
@@ -82,6 +90,10 @@ export interface InvariantInferJobData {
 
 export interface FixtureWriteJobData {
   fixture_id: string;
+}
+
+export interface BisectRunJobData {
+  bisect_job_id: string;
 }
 
 // ── Producers ─────────────────────────────────────────────────────────────
@@ -106,6 +118,18 @@ export async function enqueueFixtureWrite(
 ): Promise<string | undefined> {
   const job = await getWriteQueue().add(WRITE_QUEUE, data, {
     jobId: `write-${data.fixture_id}-${Date.now()}`,
+  });
+  return job.id;
+}
+
+/**
+ * Enqueue a bisect.run job onto the halley-worker queue.
+ */
+export async function enqueueBisectRun(
+  data: BisectRunJobData
+): Promise<string | undefined> {
+  const job = await getBisectQueue().add(BISECT_QUEUE, data, {
+    jobId: `bisect-${data.bisect_job_id}-${Date.now()}`,
   });
   return job.id;
 }

@@ -129,8 +129,8 @@ def _eval_metric(
 ) -> list[InvariantResult]:
     results = []
 
-    # In pure replay, actual tokens come from the cassette (served output bodies
-    # contain the same usage as recorded). Sum from served entries.
+    # Token and span counts come from the served entries (live calls carry
+    # their actual token usage; cassette hits carry recorded usage).
     total_input = sum(s.get("input_tokens", 0) for s in served)
     total_output = sum(s.get("output_tokens", 0) for s in served)
 
@@ -154,14 +154,28 @@ def _eval_metric(
                 f"bound={bound}, actual={actual}",
             ))
 
-    # cost_max_usd — in pure mode, actual cost is $0.
+    # cost_max_usd:
+    # - Cassette-only (pure) run: actual cost = $0. Always passes (recorded
+    #   cost trivially <= bound since the bound was derived from the recording).
+    # - Hybrid run (any live calls): evaluate actual live spend vs. bound.
+    #   A prompt regression that triggers live calls may produce a more
+    #   expensive response, which should fail the cost invariant.
     cost_bound = metric.get("cost_max_usd")
     if cost_bound is not None:
-        results.append(InvariantResult(
-            "metric.cost_max_usd",
-            True,
-            f"bound={cost_bound}, actual=$0.00 (pure replay)",
-        ))
+        live_cost = sum(s.get("cost_usd", 0.0) for s in served if s.get("source") == "live")
+        if live_cost > 0:
+            ok = live_cost <= cost_bound
+            results.append(InvariantResult(
+                "metric.cost_max_usd",
+                ok,
+                f"bound={cost_bound}, actual=${live_cost:.6f} (hybrid live calls)",
+            ))
+        else:
+            results.append(InvariantResult(
+                "metric.cost_max_usd",
+                True,
+                f"bound={cost_bound}, actual=$0.00 (pure replay — cassette hits only)",
+            ))
 
     return results
 

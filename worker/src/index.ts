@@ -15,9 +15,12 @@ import { processInvariantInfer } from "./jobs/invariant-infer.js";
 import type { InvariantInferJobData } from "./jobs/invariant-infer.js";
 import { processFixtureWrite } from "./jobs/fixture-write.js";
 import type { FixtureWriteJobData } from "./jobs/fixture-write.js";
+import { processBisectRun } from "./jobs/bisect-run.js";
+import type { BisectRunJobData } from "./jobs/bisect-run.js";
 
-const INFER_QUEUE = "invariant.infer";
-const WRITE_QUEUE = "fixture.write";
+const INFER_QUEUE  = "invariant.infer";
+const WRITE_QUEUE  = "fixture.write";
+const BISECT_QUEUE = "bisect.run";
 
 // Shared BullMQ options — reuse the Redis singleton.
 // maxRetriesPerRequest: null is required by BullMQ (set in getRedis()).
@@ -59,15 +62,27 @@ async function main() {
     console.error(`[${WRITE_QUEUE}] failed     job_id=${job?.id}  error=${err.message}`)
   );
 
+  const bisectWorker = new Worker<BisectRunJobData>(
+    BISECT_QUEUE,
+    async (job) => { await processBisectRun(job); },
+    { ...workerOpts, concurrency: 1 }
+  );
+  bisectWorker.on("completed", (job) =>
+    console.log(`[${BISECT_QUEUE}] completed  job_id=${job.id}`)
+  );
+  bisectWorker.on("failed", (job, err) =>
+    console.error(`[${BISECT_QUEUE}] failed     job_id=${job?.id}  error=${err.message}`)
+  );
+
   console.log(
-    `[halley-worker] listening on queues "${INFER_QUEUE}", "${WRITE_QUEUE}"`
+    `[halley-worker] listening on queues "${INFER_QUEUE}", "${WRITE_QUEUE}", "${BISECT_QUEUE}"`
   );
 
   // ── Graceful shutdown ──────────────────────────────────────────────────────
 
   async function shutdown(signal: string) {
     console.log(`[halley-worker] ${signal} received — draining workers…`);
-    await Promise.all([inferWorker.close(), writeWorker.close()]);
+    await Promise.all([inferWorker.close(), writeWorker.close(), bisectWorker.close()]);
     getRedis().disconnect();
     await getPool().end();
     console.log("[halley-worker] shutdown complete");

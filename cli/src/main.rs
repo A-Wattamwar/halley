@@ -49,8 +49,14 @@ enum Command {
     },
     /// Binary-search commits to find the first that breaks a fixture.
     Bisect {
-        /// Fixture slug or ID.
+        /// Fixture slug.
         fixture: String,
+        /// Last-known-good commit (hash or ref). Defaults to the first commit in the repo.
+        #[arg(long)]
+        good: Option<String>,
+        /// Path to the target git repo. Defaults to the config directory.
+        #[arg(long)]
+        repo: Option<String>,
     },
 }
 
@@ -69,9 +75,8 @@ fn main() -> Result<()> {
             allow_irreversible,
         } => cmd_ci(&cli.config, &cfg, only, &junit, &mode, allow_irreversible),
         Command::Diff { fixture } => cmd_diff(&cli.config, &cfg, &fixture),
-        Command::Bisect { .. } => {
-            eprintln!("halley bisect: not yet implemented (Day 4)");
-            Ok(())
+        Command::Bisect { fixture, good, repo } => {
+            cmd_bisect(&cli.config, &cfg, &fixture, good.as_deref(), repo.as_deref())
         }
     }
 }
@@ -92,9 +97,15 @@ fn resolve_paths(
     config_path: &std::path::Path,
     cfg: &config::HalleyConfig,
 ) -> Result<ResolvedPaths> {
-    let config_dir = config_path
+    let parent = config_path
         .parent()
-        .unwrap_or_else(|| std::path::Path::new("."))
+        .unwrap_or_else(|| std::path::Path::new("."));
+    let parent = if parent == std::path::Path::new("") {
+        std::path::Path::new(".")
+    } else {
+        parent
+    };
+    let config_dir = parent
         .canonicalize()
         .context("canonicalizing config directory")?;
 
@@ -309,6 +320,13 @@ fn cmd_ci(
         }
         cmd.env(&cfg.shim.replay_env_var, "replay");
 
+        // In pure replay mode all HTTP calls are intercepted before reaching the network.
+        // The OpenAI client validates credentials at construction time, so inject a dummy
+        // key if the real one isn't set — it is never sent over the wire.
+        if mode == "pure" && std::env::var("OPENAI_API_KEY").is_err() {
+            cmd.env("OPENAI_API_KEY", "sk-halley-replay-noop");
+        }
+
         cmd.stdin(std::process::Stdio::inherit());
         cmd.stdout(std::process::Stdio::inherit());
         cmd.stderr(std::process::Stdio::inherit());
@@ -504,6 +522,318 @@ fn cmd_diff(
         std::process::exit(diff_output.status.code().unwrap_or(1));
     }
     Ok(())
+}
+
+// ── halley bisect ─────────────────────────────────────────────────────────
+
+/// Run `halley ci --only <fixture>` once and return true if it passes.
+fn run_ci_at_commit(
+    repo_dir: &std::path::Path,
+    config_path: &std::path::Path,
+    fixture_slug: &str,
+    paths: &ResolvedPaths,
+    _cfg: &config::HalleyConfig,
+) -> bool {
+    let mut cmd = std::process::Command::new(
+        std::env::current_exe().unwrap_or_else(|_| PathBuf::from("halley")),
+    );
+    cmd.arg("--config");
+    cmd.arg(config_path.to_str().unwrap_or("halley.config.json"));
+    cmd.arg("ci");
+    cmd.arg("--only");
+    cmd.arg(fixture_slug);
+    cmd.arg("--junit");
+    cmd.arg("/dev/null");
+
+    cmd.current_dir(repo_dir);
+    // Pass SDK path so the shim can be found.
+    if let Ok(sdk) = std::env::var("HALLEY_SDK_PY_PATH") {
+        cmd.env("HALLEY_SDK_PY_PATH", sdk);
+    }
+
+    // Propagate PYTHONPATH so sdk-py is importable.
+    cmd.env("PYTHONPATH", &paths.pypath);
+    // Dummy API key for pure replay (OpenAI client credential check).
+    if std::env::var("OPENAI_API_KEY").is_err() {
+        cmd.env("OPENAI_API_KEY", "sk-halley-replay-noop");
+    }
+
+    cmd.stdout(std::process::Stdio::piped());
+    cmd.stderr(std::process::Stdio::piped());
+
+    match cmd.output() {
+        Ok(out) => out.status.success(),
+        Err(e) => {
+            eprintln!("[halley bisect]   error launching ci: {e}");
+            false
+        }
+    }
+}
+
+fn cmd_bisect(
+    config_path: &std::path::Path,
+    cfg: &config::HalleyConfig,
+    fixture_slug: &str,
+    good_ref: Option<&str>,
+    repo_override: Option<&str>,
+) -> Result<()> {
+    let paths = resolve_paths(config_path, cfg)?;
+
+    // Determine the target repo directory.
+    let repo_dir = if let Some(r) = repo_override {
+        PathBuf::from(r).canonicalize().context("canonicalizing --repo path")?
+    } else {
+        paths.config_dir.clone()
+    };
+
+    eprintln!("[halley bisect] repo        = {}", repo_dir.display());
+    eprintln!("[halley bisect] fixture     = {fixture_slug}");
+
+    // Verify this is a git repo.
+    let git_check = std::process::Command::new("git")
+        .args(["rev-parse", "--git-dir"])
+        .current_dir(&repo_dir)
+        .output()
+        .context("checking git repo")?;
+    if !git_check.status.success() {
+        anyhow::bail!("'{}' is not a git repository", repo_dir.display());
+    }
+
+    // Save the original HEAD so we can restore it.
+    let orig_head = git_rev_parse(&repo_dir, "HEAD")?;
+    let orig_branch = git_current_branch(&repo_dir).unwrap_or_default();
+    eprintln!("[halley bisect] original HEAD = {orig_head}");
+
+    // Collect linear commit history (newest first → oldest last).
+    let log_out = std::process::Command::new("git")
+        .args(["log", "--format=%H %s", "HEAD"])
+        .current_dir(&repo_dir)
+        .output()
+        .context("running git log")?;
+    let log_text = String::from_utf8_lossy(&log_out.stdout);
+    let commits: Vec<(String, String)> = log_text
+        .lines()
+        .filter(|l| !l.trim().is_empty())
+        .map(|l| {
+            let (hash, rest) = l.split_once(' ').unwrap_or((l, ""));
+            (hash.to_string(), rest.to_string())
+        })
+        .collect();
+
+    if commits.is_empty() {
+        anyhow::bail!("No commits found in the repo");
+    }
+
+    // Resolve good commit (oldest end of the search range).
+    let good_hash = match good_ref {
+        Some(r) => git_rev_parse(&repo_dir, r)?,
+        None => {
+            // Default: earliest (first) commit.
+            commits.last().map(|(h, _)| h.clone()).unwrap()
+        }
+    };
+    eprintln!("[halley bisect] good commit  = {}", &good_hash[..8]);
+
+    // The bad end is always the current HEAD.
+    let bad_hash = commits.first().map(|(h, _)| h.clone()).unwrap();
+    eprintln!("[halley bisect] bad commit   = {}", &bad_hash[..8]);
+
+    if good_hash == bad_hash {
+        anyhow::bail!("good and bad commits are the same — nothing to bisect");
+    }
+
+    // Build the ordered slice [good..=bad] in chronological order.
+    // commits is newest-first, so we want [bad_idx..=good_idx] reversed.
+    let good_idx = commits
+        .iter()
+        .position(|(h, _)| h.starts_with(&good_hash) || good_hash.starts_with(h.as_str()))
+        .ok_or_else(|| anyhow::anyhow!("good commit {good_hash} not found in log"))?;
+    let bad_idx = commits
+        .iter()
+        .position(|(h, _)| h.starts_with(&bad_hash) || bad_hash.starts_with(h.as_str()))
+        .unwrap_or(0);
+
+    // candidates[0] = good (earliest), candidates[last] = bad (latest)
+    let candidates: Vec<(String, String)> = commits[bad_idx..=good_idx]
+        .iter()
+        .cloned()
+        .rev() // now chronological order
+        .collect();
+
+    eprintln!(
+        "[halley bisect] search range: {} commits",
+        candidates.len()
+    );
+
+    // We know good_commit passes and bad_commit fails.
+    // Binary search for the first failing commit.
+    // lo = last known good index, hi = first known bad index.
+    let mut lo = 0usize;
+    let mut hi = candidates.len() - 1;
+
+    // Validate boundary assumptions.
+    eprintln!("[halley bisect] verifying good commit...");
+    if !test_commit_reliable(&repo_dir, config_path, &candidates[lo].0, fixture_slug, &paths, cfg) {
+        eprintln!(
+            "[halley bisect] WARNING: 'good' commit {} already fails — widening search not supported in v1. Proceeding anyway.",
+            &candidates[lo].0[..8]
+        );
+    }
+
+    let tries = 3;
+
+    while lo + 1 < hi {
+        let mid = (lo + hi) / 2;
+        let (hash, subject) = &candidates[mid];
+        eprintln!(
+            "[halley bisect] checking {} ({}) …",
+            &hash[..8],
+            subject
+        );
+
+        let passes = test_commit_reliable_n(&repo_dir, config_path, hash, fixture_slug, &paths, cfg, tries);
+        if passes {
+            eprintln!("[halley bisect]   → PASS (good)");
+            lo = mid;
+        } else {
+            eprintln!("[halley bisect]   → FAIL (bad)");
+            hi = mid;
+        }
+    }
+
+    // hi is the first bad commit.
+    // Do a final reliable test on hi to be sure.
+    let (final_hash, final_subject) = &candidates[hi].clone();
+    eprintln!(
+        "[halley bisect] confirming first-bad candidate {}…",
+        &final_hash[..8]
+    );
+    let confirmed_bad = !test_commit_reliable_n(
+        &repo_dir,
+        config_path,
+        final_hash,
+        fixture_slug,
+        &paths,
+        cfg,
+        tries,
+    );
+
+    // Restore original working state.
+    restore_repo(&repo_dir, &orig_head, &orig_branch);
+
+    if confirmed_bad {
+        let short = &final_hash[..8];
+        eprintln!("\n[halley bisect] ─────────────────────────────────────────");
+        eprintln!("[halley bisect] First failing commit: {short} {final_subject}");
+        eprintln!("[halley bisect] Fixture '{fixture_slug}' broke at {final_hash}");
+        eprintln!("[halley bisect] ─────────────────────────────────────────");
+        // Output a machine-readable line for the worker to parse.
+        println!("BISECT_RESULT: {final_hash} {final_subject}");
+    } else {
+        eprintln!("[halley bisect] could not confirm a single bad commit — range may be flaky or too narrow.");
+        std::process::exit(1);
+    }
+
+    Ok(())
+}
+
+/// Test a commit up to `n` times; treat as passing only if it passes every time.
+/// Treat as failing if it fails `n` times consistently (absorbs noise, ROADMAP risk #5).
+fn test_commit_reliable_n(
+    repo_dir: &std::path::Path,
+    config_path: &std::path::Path,
+    commit: &str,
+    fixture_slug: &str,
+    paths: &ResolvedPaths,
+    cfg: &config::HalleyConfig,
+    n: usize,
+) -> bool {
+    // Checkout the candidate.
+    let co = std::process::Command::new("git")
+        .args(["checkout", commit, "--"])
+        .current_dir(repo_dir)
+        .output();
+    if co.is_err() || !co.unwrap().status.success() {
+        // Try detached HEAD checkout.
+        let _ = std::process::Command::new("git")
+            .args(["checkout", "--detach", commit])
+            .current_dir(repo_dir)
+            .output();
+    }
+
+    let mut pass_count = 0;
+    let mut fail_count = 0;
+    for _ in 0..n {
+        if run_ci_at_commit(repo_dir, config_path, fixture_slug, paths, cfg) {
+            pass_count += 1;
+        } else {
+            fail_count += 1;
+        }
+        // Short-circuit: if it's already failed consistently, stop early.
+        if fail_count == n {
+            return false;
+        }
+        if pass_count == n {
+            return true;
+        }
+    }
+    // Treat as failed only if consistently failing (>= n times).
+    fail_count < n
+}
+
+fn test_commit_reliable(
+    repo_dir: &std::path::Path,
+    config_path: &std::path::Path,
+    commit: &str,
+    fixture_slug: &str,
+    paths: &ResolvedPaths,
+    cfg: &config::HalleyConfig,
+) -> bool {
+    test_commit_reliable_n(repo_dir, config_path, commit, fixture_slug, paths, cfg, 1)
+}
+
+fn git_rev_parse(repo_dir: &std::path::Path, git_ref: &str) -> Result<String> {
+    let out = std::process::Command::new("git")
+        .args(["rev-parse", git_ref])
+        .current_dir(repo_dir)
+        .output()
+        .with_context(|| format!("git rev-parse {git_ref}"))?;
+    if !out.status.success() {
+        anyhow::bail!("git rev-parse {git_ref} failed");
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+fn git_current_branch(repo_dir: &std::path::Path) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .args(["symbolic-ref", "--short", "HEAD"])
+        .current_dir(repo_dir)
+        .output()
+        .ok()?;
+    if out.status.success() {
+        Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+fn restore_repo(repo_dir: &std::path::Path, orig_head: &str, orig_branch: &str) {
+    if !orig_branch.is_empty() {
+        let status = std::process::Command::new("git")
+            .args(["checkout", orig_branch])
+            .current_dir(repo_dir)
+            .status();
+        if status.is_ok_and(|s| s.success()) {
+            eprintln!("[halley bisect] restored branch '{orig_branch}'");
+            return;
+        }
+    }
+    // Fallback: checkout by hash.
+    let _ = std::process::Command::new("git")
+        .args(["checkout", orig_head])
+        .current_dir(repo_dir)
+        .status();
+    eprintln!("[halley bisect] restored to {}", &orig_head[..8]);
 }
 
 fn find_fixtures(fixtures_dir: &std::path::Path, only: Option<&str>) -> Result<Vec<PathBuf>> {
