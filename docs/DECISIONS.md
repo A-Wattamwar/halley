@@ -1102,3 +1102,11 @@ table-qualified name (`hex(observations.span_id)`,
 `hex(observation_body.body_hash)`). Table-qualified references bypass alias
 resolution and bind to the raw column. Fixed in `halley-query/detail.ts`
 (two WHERE clauses). Applies to every future query module under `halley-query/`.
+
+### D51. Replay interception via a thin per-language in-process shim, not an HTTP proxy.
+
+**D51. Replay interception via a thin per-language in-process shim, not an HTTP proxy.** The Rust `halley` CLI orchestrates replay but delegates interception to a small per-language shim that patches the client/transport layer (Python `httpx`/`requests` first, TS `fetch`/`undici` second — the `vcr-llm` approach). The shim canonicalizes + hashes each provider/tool request (D22), matches the cassette (hit → recorded response, $0; miss → live call recorded as a new version), and shares one cassette format + hash across languages.
+
+**Rationale (researched against the May-2026 state of the art):** the tools shipping this pattern (`vcr-llm`, `pytest-agentcontract`, `agentsnap`, `llm-test-harness`) all intercept in-process, because (1) LLM calls all POST to one URL so URL-based proxy matching fails, (2) a proxy loses SSE streaming frame boundaries — breaking bit-fidelity, and (3) a proxy can't see in-process tool calls — which would gut Halley's "same tools, same order" structural invariant. Interception is not Halley's differentiator (portable in-repo fixtures + `bisect` + tool-effect-safe replay are), so the mechanism is chosen to protect those.
+
+**Tradeoff:** a shim is per-language. Mitigated by shipping Python first (the flagship demo is Python), reusing `sdk-ts/` for TS, and documenting an HTTP-proxy fallback for languages without a shim. Superseded only if a future single-binary interception approach proves equal on streaming + in-process tools.

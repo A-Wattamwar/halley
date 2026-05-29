@@ -127,13 +127,20 @@ export function LiveSpansIsland({ runId, initialSpanIds }: Props) {
     }
   }, [newSpans.length]);
 
-  const showSection = newSpans.length > 0 || connState !== "open";
+  // The new-spans panel (header + rows) is visible when there's content or
+  // the connection is in a non-open state. The badge itself is ALWAYS shown.
+  const showPanel = newSpans.length > 0 || connState !== "open";
 
   return (
     <>
-      {/* ── Live section (always mounted so IntersectionObserver works) ── */}
-      <div ref={sectionRef} className={showSection ? "mt-3" : "mt-3 hidden"}>
-        {showSection && (
+      {/* ── Persistent connection badge — always visible once mounted ── */}
+      <div className="mt-3 flex items-center justify-end px-1">
+        <ConnectionBadge state={connState} />
+      </div>
+
+      {/* ── Live section — only when there's content or connecting/disconnected ── */}
+      <div ref={sectionRef} className={showPanel ? "mt-2" : "mt-2 hidden"}>
+        {showPanel && (
           <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
             <div className="px-5 py-3 border-b border-gray-800 flex items-center gap-3">
               <h2 className="text-sm font-semibold text-white uppercase tracking-wider">
@@ -144,10 +151,6 @@ export function LiveSpansIsland({ runId, initialSpanIds }: Props) {
                   {newSpans.length} new span{newSpans.length === 1 ? "" : "s"}
                 </span>
               )}
-              {/* Connection state badge — right-aligned */}
-              <span className="ml-auto">
-                <ConnectionBadge state={connState} />
-              </span>
             </div>
 
             {newSpans.length > 0 && (
