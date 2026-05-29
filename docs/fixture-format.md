@@ -303,3 +303,39 @@ examples/replay-target/
 ```
 
 See `examples/replay-target/` in this repository for the actual fixture files.
+
+---
+
+## 7. Known limitations (v1)
+
+### Float exponent representation divergence
+
+The D22 canonical JSON hash is computed independently by the Python shim
+(`sdk-py/halley_sdk/canonical.py`) and the Rust ingester
+(`ingester/src/domain/span.rs::canonicalize_json`). Both agree on all float
+values that appear in LLM chat completion request bodies (temperature, top_p,
+frequency_penalty, presence_penalty — all short decimals or integers).
+
+However, pathological floats with scientific-notation exponents can produce
+different canonical strings:
+
+| Value | Python `json.dumps` | Rust `serde_json` |
+|---|---|---|
+| `1e20` | `"1e+20"` | `"1e20"` |
+| `1e-7` | `"1e-07"` | `"1e-7"` |
+| `0.7`  | `"0.7"` (agree) | `"0.7"` (agree) |
+| `0.0`  | `"0.0"` (agree) | `"0.0"` (agree) |
+
+Since `hash(canonical)` differs when the canonical strings differ, a
+fixture containing such values in its request bodies would not be
+replayable across Python↔Rust boundaries. This does not affect the v1
+hero loop (Python shim records and replays using the same Python
+canonicalizer), nor the worker-written fixtures (worker uses the same
+Rust canonicalizer that the ingester used to compute the stored hash).
+It only affects the cross-language path: promoting a worker-written fixture
+to shim replay, which is a Tier-1 (OTLP) path already known to be
+non-bit-faithful (D53).
+
+If this needs fixing in a future version, the solution is to normalize
+float exponent format in the Python canonicalizer to match Rust's output
+(strip the `+` sign and leading zeros from exponents).

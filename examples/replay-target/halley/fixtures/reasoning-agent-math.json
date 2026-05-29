@@ -1,0 +1,116 @@
+{
+  "fixture_format_version": 1,
+  "fixture_id": "b6f051e4-c513-4971-abb8-844d557381b1",
+  "source_run_id": "fd9e289e62ab47d78aa221dc4fe875db",
+  "run_name": "reasoning-agent-math",
+  "started_at_ms": 1780076741788,
+  "dialect": "halley-raw",
+  "top_model": "gpt-4o-mini",
+  "written_at": "2026-05-29T17:45:46.948190+00:00",
+  "observations": [
+    {
+      "index": 0,
+      "span_id": "0000000000000000",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1780076741788,
+      "ended_at_ms": 1780076743991,
+      "duration_ms": 2203,
+      "input_tokens": 123,
+      "output_tokens": 1,
+      "match_key": "006959f34df0e7ce4a5619cad0f2acad74e84d3ccdf55f8b42d9a7e9e2cdac83",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-006959f34df0e7ce4a5619cad0f2acad74e84d3ccdf55f8b42d9a7e9e2cdac83.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-ca809b9c086189a8099919c0920e04442e75f65d4eabb62ba04e052b0ab94d31.json"
+    },
+    {
+      "index": 1,
+      "span_id": "0000000000000001",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1780076743998,
+      "ended_at_ms": 1780076744941,
+      "duration_ms": 943,
+      "input_tokens": 64,
+      "output_tokens": 10,
+      "match_key": "cf3c92f5005548cc08b8154c62af70e3870d36c2497a9440e810117e13e91882",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-cf3c92f5005548cc08b8154c62af70e3870d36c2497a9440e810117e13e91882.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-173a3d16a86c4017b203cfbff672c6d2c50fce61ccd13c9c2c1fa7cb19e39a10.json"
+    },
+    {
+      "index": 2,
+      "span_id": "0000000000000002",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1780076744948,
+      "ended_at_ms": 1780076745596,
+      "duration_ms": 648,
+      "input_tokens": 30,
+      "output_tokens": 3,
+      "match_key": "0cec675666bfebd2ce6e1ea21c178430da53b633b67517645a6eddc036604bb6",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-0cec675666bfebd2ce6e1ea21c178430da53b633b67517645a6eddc036604bb6.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-1cf97b0c6378cd3510ad0ce9ef698d4377d0691348f7ace8f9d9382c3e842482.json"
+    },
+    {
+      "index": 3,
+      "span_id": "0000000000000003",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1780076745601,
+      "ended_at_ms": 1780076746071,
+      "duration_ms": 470,
+      "input_tokens": 30,
+      "output_tokens": 3,
+      "match_key": "a2bc1ced30fec00fe8b1f65847acaacc41af153b8dc5b71c3e06675e9b7abf72",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-a2bc1ced30fec00fe8b1f65847acaacc41af153b8dc5b71c3e06675e9b7abf72.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-84bbe97c172cbcc49e1e94d8c99ac38b5b49a946b353f400490eb3c89075c99b.json"
+    },
+    {
+      "index": 4,
+      "span_id": "0000000000000004",
+      "parent_span_id": null,
+      "operation": "chat",
+      "model": "gpt-4o-mini",
+      "system": "openai",
+      "status": "ok",
+      "started_at_ms": 1780076746074,
+      "ended_at_ms": 1780076746945,
+      "duration_ms": 871,
+      "input_tokens": 30,
+      "output_tokens": 3,
+      "match_key": "a2bc1ced30fec00fe8b1f65847acaacc41af153b8dc5b71c3e06675e9b7abf72",
+      "input_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-a2bc1ced30fec00fe8b1f65847acaacc41af153b8dc5b71c3e06675e9b7abf72.json",
+      "output_body_ref": "halley/fixtures/reasoning-agent-math/bodies/sha256-b53ce490ca99cc4a80f2e91896e9d4ec122b076d9ef3dd21ea0a92ac72d167e5.json"
+    }
+  ],
+  "invariants": {
+    "structural": {
+      "span_count": 5,
+      "operation_sequence": ["chat", "chat", "chat", "chat", "chat"],
+      "operation_sequence_mode": "exact",
+      "required_operations": ["chat"],
+      "parent_index": [null, null, null, null, null]
+    },
+    "metric": {
+      "input_tokens_max": 300,
+      "output_tokens_max": 50,
+      "latency_max_ms": 10000,
+      "cost_max_usd": 0.001
+    }
+  },
+  "replay_matching": {
+    "strategy": "input_body_hash_v1",
+    "description": "The replay shim computes SHA-256 of the D22 canonical JSON of the incoming request body against each observation's match_key. Matching is ordinal: repeated identical match_keys are consumed in index order via a per-key cursor. On hit the shim serves its recorded output_body_ref."
+  }
+}
