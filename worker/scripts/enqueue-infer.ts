@@ -67,8 +67,8 @@ async function main() {
 
   const job = await queue.add(
     QUEUE_NAME,
-    { run_id: runId },
-    { jobId: `infer-${runId}-${Date.now()}` }
+    { fixture_id: fixtureId, run_id: runId },
+    { jobId: `infer-${fixtureId}-${Date.now()}` }
   );
 
   console.log(`[enqueue-infer] enqueued job_id=${job.id}  fixture_id=${fixtureId}`);

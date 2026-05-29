@@ -29,6 +29,12 @@ export interface ObservationRow {
   input_tokens: number;
   output_tokens: number;
   attributes: Record<string, string>;
+  /**
+   * 64-char uppercase hex of the SHA-256 output body hash.
+   * Empty string ("") when the span has no recorded output body.
+   * Matches the halley.observation_body.body_hash column (FixedString(32)).
+   */
+  output_body_hash: string;
 }
 
 interface RawRow {
@@ -47,6 +53,7 @@ interface RawRow {
   input_tokens: string;
   output_tokens: string;
   attributes: Record<string, string>;
+  output_body_hash: string;
 }
 
 /**
@@ -63,11 +70,11 @@ export async function loadRunObservations(
     const result = await ch.query({
       query: `
         SELECT
-          hex(observations.run_id)         AS run_id,
-          hex(observations.span_id)        AS span_id,
-          hex(observations.parent_span_id) AS parent_span_id,
-          toUnixTimestamp64Milli(start_time) AS start_time_ms,
-          toUnixTimestamp64Milli(end_time)   AS end_time_ms,
+          hex(observations.run_id)             AS run_id,
+          hex(observations.span_id)            AS span_id,
+          hex(observations.parent_span_id)     AS parent_span_id,
+          toUnixTimestamp64Milli(start_time)   AS start_time_ms,
+          toUnixTimestamp64Milli(end_time)     AS end_time_ms,
           gen_ai_operation,
           gen_ai_request_model,
           gen_ai_system,
@@ -75,9 +82,10 @@ export async function loadRunObservations(
           source_dialect,
           is_run_root,
           run_name,
-          gen_ai_usage_input_tokens  AS input_tokens,
-          gen_ai_usage_output_tokens AS output_tokens,
-          attributes
+          gen_ai_usage_input_tokens            AS input_tokens,
+          gen_ai_usage_output_tokens           AS output_tokens,
+          attributes,
+          ifNull(hex(output_body_hash), '')    AS output_body_hash
         FROM halley.observations
         WHERE hex(observations.run_id) = {runId: String}
         ORDER BY start_time ASC
@@ -100,10 +108,11 @@ export async function loadRunObservations(
       source_dialect:       r.source_dialect,
       is_run_root:
         r.is_run_root === true || r.is_run_root === "true" || r.is_run_root === 1,
-      run_name:       r.run_name ?? "",
-      input_tokens:   parseInt(r.input_tokens,  10) || 0,
-      output_tokens:  parseInt(r.output_tokens, 10) || 0,
-      attributes:     r.attributes ?? {},
+      run_name:         r.run_name ?? "",
+      input_tokens:     parseInt(r.input_tokens,  10) || 0,
+      output_tokens:    parseInt(r.output_tokens, 10) || 0,
+      attributes:       r.attributes ?? {},
+      output_body_hash: r.output_body_hash ?? "",
     }));
   } finally {
     await ch.close();
