@@ -83,11 +83,12 @@ jobs:
           echo "HALLEY_SDK_PY_PATH=$GITHUB_WORKSPACE/sdk-py" >> "$GITHUB_ENV"
 
       # halley.config.json runs .venv/bin/python — that path must exist on the runner.
+      # agent.py imports traceloop at module load; install full requirements.txt.
       - name: Create agent venv (matches halley.config.json)
         working-directory: examples/reasoning-agent-python
         run: |
           python -m venv .venv
-          .venv/bin/pip install --quiet openai
+          .venv/bin/pip install --quiet -r requirements.txt
 
       # ── Run halley ci ─────────────────────────────────────────────────────
       - name: Run halley ci (pure mode, $0)
@@ -97,6 +98,8 @@ jobs:
           # Pure replay never makes live calls; dummy key satisfies OpenAI SDK
           # credential check at construction time.
           OPENAI_API_KEY: sk-halley-ci-noop
+          # Do not send OTLP spans during CI replay (agent still imports traceloop).
+          TRACELOOP_BASE_URL: ""
         run: |
           set -o pipefail
           set +e
