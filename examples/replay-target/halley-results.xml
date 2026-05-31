@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites tests="19" failures="0" errors="0">
+  <testsuite name="reasoning-agent-math" tests="19" failures="0" errors="0">
+    <testcase name="structural.span_count" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="structural.operation_sequence" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="structural.required_operations" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="structural.parent_index" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="metric.input_tokens_max" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="metric.output_tokens_max" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="metric.latency_max_ms" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="metric.span_count" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="metric.cost_max_usd" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[0].required_keys" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[0].key_types" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[1].required_keys" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[1].key_types" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[2].required_keys" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[2].key_types" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[3].required_keys" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[3].key_types" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[4].required_keys" classname="reasoning-agent-math">
+    </testcase>
+    <testcase name="schema.span[4].key_types" classname="reasoning-agent-math">
+    </testcase>
+  </testsuite>
+</testsuites>
