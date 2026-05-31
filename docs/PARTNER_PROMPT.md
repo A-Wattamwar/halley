@@ -27,9 +27,12 @@ This is what makes Halley different from Langfuse, Laminar, LangSmith, Phoenix, 
 - Next.js 14 dashboard (App Router, Server Components, Tailwind, shadcn/ui)
 - Docker Compose for local dev (dbmate for migrations)
 - Rust toolchain pinned at 1.85
-- No proprietary SDK — users point any OTLP-emitting app at Halley
+- Rust `halley` CLI (`cli/`) — host-side: `record`, `ci`, `diff`, `bisect`
+- Python replay shim (`sdk-py/halley_sdk/`) — dual-mode record/replay via httpx patch (D51, D53)
+- Node.js worker (`worker/`) — BullMQ: `invariant.infer`, `fixture.write`, `bisect.run`
+- OTLP ingest is Tier 1 (zero Halley code). **Tier 2 bit-fidelity replay** requires the Halley recorder shim (one-line client wrap)
 
-# What has been built (as of Phase 4 Week 7 end; Week 8 Day 1 committed, pending review)
+# What has been built (as of Phase 5 complete — Weeks 9–10, 2026-05-29)
 
 Phase 1 (Weeks 1-2): Full infrastructure. ClickHouse + Postgres + Redis + Rust ingester + Next.js dashboard placeholder. `docker compose up` brings everything healthy. `make smoke` passes 20/20 assertions. dbmate migrations for both ClickHouse and Postgres (D24).
 
@@ -37,11 +40,13 @@ Phase 2 (Weeks 3-4): Production-quality ingester. OTLP/HTTP + OTLP/gRPC receiver
 
 Phase 3 Week 5: Three real-world example apps emitting real OpenAI traces into Halley (Python Reasoning Agent via Traceloop/otel-genai, Vercel AI SDK app via vercel-ai, TypeScript+OpenInference via openinference). Three quickstart docs. Real OpenAI pricing loaded. Total OpenAI cost: $0.000074.
 
-Phase 3 Week 6: Dashboard became usable. Runs list (paginated, project-scoped) + run detail with timeline view, span inspector (identity/timing/model/usage + pretty-printed input/output bodies), and a dagre-laid-out ReactFlow graph (Timeline | Graph tabs). The flat spans table moved to `/spans` as a debug view (D45-D47). Known bug carried into Phase 4: span inspector router-cache staleness on `?span=` changes.
+Phase 3 Week 6: Dashboard became usable. Runs list (paginated, project-scoped) + run detail with timeline view, span inspector (identity/timing/model/usage + pretty-printed input/output bodies), and a dagre-laid-out ReactFlow graph (Timeline | Graph tabs). The flat spans table moved to `/spans` as a debug view (D45-D47).
 
-Phase 4 Week 7: Auth + API keys. Auth.js CredentialsProvider (email+password) with Postgres adapter, `/login` page, route-protecting middleware. Session-aware, project-scoped `halley-query` functions. API keys management page (`/settings/keys`: create/rotate/revoke). Ingester API-key validation: `Authorization: Bearer hlly_...`, SHA-256 hash-only storage, `hlly_` prefix for identification + secret-scanning, Redis 60s-TTL cache on the hot path, `HALLEY_AUTH_REQUIRED=false` dev bypass (D48). Only Rust change in the phase.
+Phase 4 (Weeks 7-8): Auth + API keys + live updates. Auth.js CredentialsProvider with Postgres adapter, `/login`, project-scoped `halley-query`, API keys page (`/settings/keys`), ingester API-key validation (D48). SSE live span streaming via Redis Pub/Sub (D49 — not WebSockets). Playwright E2E. Bug fixes: ClickHouse 24.8 alias shadowing in span inspector (D50), runs-list "All time" hidden floor, Docker Postgres URL for dashboard, Live badge persistence.
 
-Phase 4 Week 8 Day 1 (committed `35fd180`, NOT yet reviewed/approved by us): fire-and-forget Redis Pub/Sub publisher in `ingester/src/pipeline/writer.rs` — after a successful ClickHouse insert, publishes minimal JSON (`span_id`, `gen_ai_operation`, `status`, `start_time`, `model`) to `halley:live:<hex_run_id>`. Local `pubsub_output.log` showed a captured `pmessage`, so it was at least manually verified once. Not docker-rebuilt/cargo-tested under our review. Treat as in-flight, not done.
+Phase 5 Week 9: **Promote a run to a fixture.** Worker BullMQ runtime (`invariant.infer`, `fixture.write`). Structural + schema + metric invariant inference; semantic stub (off). Dashboard: "Turn this run into a test" → `/fixtures/[id]/edit` invariant editor → write to repo → `/fixtures` list. Fixture format v1 on disk (`<slug>.json` + content-addressed `bodies/`, D52). Redis host port 6380 (mirrors Postgres 5433 pattern).
+
+Phase 5 Week 10: **THE HERO LOOP.** Rust `halley` CLI + Python shim (D51, D53). `halley record` captures bit-fidelity raw provider bodies via httpx interception + sitecustomize injection. D22 parity proven Python↔Rust. `halley ci` pure mode ($0 replay, ordinal cursor, JUnit XML). Hybrid mode + `halley diff` + tool-effect-safe replay (irreversible guard). `halley bisect` binary-searches commits (3× retry, repo restore). `bisect.run` worker + dashboard BisectPanel. GitHub Action (`.github/workflows/halley-ci.yml`). Hero demo: `~/halley-hero-demo/demo.sh` — ci→regression→bisect in ~7s, $0, authentic shim-recorded fixture. Fixture format v1 **LOCKED** (validated Week 10).
 
 # Critical documents to read
 
@@ -50,10 +55,11 @@ Before doing anything substantive, read these files from the repo in this order:
 1. README.md — the pitch and architecture diagram
 2. docs/SCENARIO.md — concrete real-world story of what Halley does
 3. docs/ARCHITECTURE.md — full system design (v0.2)
-4. docs/ROADMAP.md — 12-week plan (v0.5)
-5. docs/DECISIONS.md — every non-obvious technical choice (D1 through D44+)
-6. The current phase plan in docs/plan/ (whichever phase is active)
-7. docs/research/*.md — competitive and technical research notes
+4. docs/ROADMAP.md — 12-week plan (v0.7)
+5. docs/DECISIONS.md — every non-obvious technical choice (D1 through D53+)
+6. docs/fixture-format.md — locked fixture v1 contract (D52)
+7. The current phase plan in docs/plan/ (Phase 6 when active)
+8. docs/research/*.md — competitive and technical research notes
 
 # Locked technical contracts (never change without explicit approval)
 
@@ -66,6 +72,7 @@ Before doing anything substantive, read these files from the repo in this order:
 - Migration tooling: dbmate, single SQL statement per migration file (D24)
 - Rust toolchain: 1.85 (D28)
 - Fixtures live in the user's repo as portable JSON + content-addressed blobs, NOT in Halley's server
+- Fixture on-disk format v1 (`fixture_format_version: 1`, `input_body_hash_v1` replay matching, ordinal cursor — D52, D53). See docs/fixture-format.md
 - Writer retry policy: transient errors (network/connect) retry forever with 30s-capped backoff; permanent errors DLQ after 3 attempts (D30)
 
 # Working disciplines
@@ -78,6 +85,12 @@ Before doing anything substantive, read these files from the repo in this order:
 - D-10: Dashboard-only weeks don't touch Rust or Docker.
 - D-11: Server Components first; "use client" only when needed.
 - D-12: All ClickHouse queries through dashboard/src/lib/halley-query/.
+- D-16: `halley` CLI is Rust, built/tested host-side with cargo — never rebuild Docker to test CLI.
+- D-17: Replay via per-language in-process shim (Python first); shared cassette format + D22 hash (D51).
+- D-18: Worker BullMQ uses prefix `halley:worker:` — must NOT touch `halley:spans` / `halley:writers` / `halley:live:*`.
+- D-19: Dev fixtures written to `examples/replay-target/` (local path). GitHub App push is Phase 6.
+- D-20: OpenAI budget — gpt-4o-mini only; report hybrid/live-call spend.
+- D-21: Worker Docker rebuild at most once per day it changes.
 
 # How you operate
 
@@ -104,16 +117,20 @@ Before doing anything substantive, read these files from the repo in this order:
 - ClickHouse TTL requires toDateTime() cast on DateTime64 columns (D11).
 - ClickHouse dbmate migrations: one SQL statement per file (D24). Multi-statement files fail silently.
 - ReplacingMergeTree dedup is eventual. Don't assert exact row counts immediately after insert.
+- OTLP bodies are gen_ai-semantic, not bit-fidelity — replay requires the Halley recorder shim (D53 Tier 2).
+- D22 canonical JSON is triplicated (ingester, cli, sdk-py) — parity-tested but drift risk; extract `halley-canonical` crate in Phase 6.
+- `halley record` runs on the host (needs OPENAI_API_KEY), not inside the Cursor sandbox.
+- Redis dev split: host uses `localhost:6380`, Docker services use `redis:6379` — same pattern as Postgres 5433.
 
-# What comes next (remaining phases)
+# What comes next
 
-Phase 3 Week 6: Dashboard runs list + run detail (timeline view + span inspector). Reactflow graph is a stretch.
+**Phase 6 (Weeks 11-12): Polish and launch.** README hero GIF (record `~/halley-hero-demo/demo.sh`), docs site, validate GitHub Action on a real PR, landing page, live demo, YouTube video, blog post, Show HN, resume bullets.
 
-Phase 4 (Weeks 7-8): Auth (Auth.js + Postgres), WebSocket live updates via Redis Pub/Sub, API keys management UI.
-
-Phase 5 (Weeks 9-10): THE HERO LOOP. "Turn this run into a test" button, invariant inference worker, fixture writer to user's repo, halley CLI (ci, record, bisect, diff), replay modes (pure/hybrid/fresh), tool-effect-safe replay, GitHub Action.
-
-Phase 6 (Weeks 11-12): Polish and launch. README GIF, docs site, CI pipeline, landing page, live demo, YouTube video, blog post, Show HN, resume bullets.
+**Phase 6 hygiene (from Phase 5 retro, do early):**
+- P0: Extract `halley-canonical` Rust crate (D22 triplication)
+- P1: TypeScript shim (`sdk-ts/`), in-process tool interception docs
+- P2: Semantic invariant runner, server-side bisect without CLI subprocess
+- P3: GitHub App fixture push to remote repo
 
 # Tone
 

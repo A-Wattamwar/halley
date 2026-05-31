@@ -82,11 +82,12 @@ jobs:
           pip install --quiet -e sdk-py/
           echo "HALLEY_SDK_PY_PATH=$GITHUB_WORKSPACE/sdk-py" >> "$GITHUB_ENV"
 
-      - name: Install agent dependencies (for replay)
+      # halley.config.json runs .venv/bin/python — that path must exist on the runner.
+      - name: Create agent venv (matches halley.config.json)
         working-directory: examples/reasoning-agent-python
         run: |
-          pip install --quiet openai
-          # Traceloop is not needed for pure-mode replay; skip to keep CI fast.
+          python -m venv .venv
+          .venv/bin/pip install --quiet openai
 
       # ── Run halley ci ─────────────────────────────────────────────────────
       - name: Run halley ci (pure mode, $0)
@@ -97,18 +98,22 @@ jobs:
           # credential check at construction time.
           OPENAI_API_KEY: sk-halley-ci-noop
         run: |
+          set -o pipefail
           set +e
           "$HALLEY_CLI" ci \
+            --only reasoning-agent-math \
             --junit "$GITHUB_WORKSPACE/halley-results.xml" \
             2>&1 | tee halley-ci-output.txt
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          exit_code=${PIPESTATUS[0]}
+          echo "exit_code=${exit_code}" >> "$GITHUB_OUTPUT"
+          exit "${exit_code}"
 
       # ── Publish test results ──────────────────────────────────────────────
       - name: Publish JUnit test results
         uses: EnricoMi/publish-unit-test-result-action@v2
         if: always()
         with:
-          files: halley-results.xml
+          files: ${{ github.workspace }}/halley-results.xml
           comment_title: "Halley Fixture Replay Results"
           comment_mode: always
           check_name: "Halley CI"
@@ -123,7 +128,7 @@ jobs:
           echo "::error title=Halley CI failed::One or more fixture invariants failed. See details below."
           echo ""
           echo "── Failure summary ──────────────────────────────────────────"
-          grep -E "FAIL|MISS|error" examples/replay-target/halley-ci-output.txt 2>/dev/null || true
+          grep -E "FAIL|MISS|error" halley-ci-output.txt 2>/dev/null || true
           echo ""
           echo "── Suggested next steps ─────────────────────────────────────"
           echo "  # Show what changed between recorded baseline and this run:"
