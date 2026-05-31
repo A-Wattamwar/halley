@@ -21,11 +21,12 @@
  */
 
 import { Queue } from "bullmq";
+import type { ConnectionOptions } from "bullmq";
 import { randomUUID } from "crypto";
 import { getRedis, getPool } from "../src/connections.js";
 
 const DEV_PROJECT_ID = "a2c7a9a8-2e1b-4d1a-9f0b-000000000001";
-const QUEUE_NAME     = "invariant.infer";
+const QUEUE_NAME = "invariant.infer";
 
 async function main() {
   const runId = (process.argv[2] ?? process.env.RUN_ID ?? "").trim().toUpperCase();
@@ -61,7 +62,9 @@ async function main() {
   // ── Enqueue the job ────────────────────────────────────────────────────────
   const redis = getRedis();
   const queue = new Queue(QUEUE_NAME, {
-    connection: redis,
+    // See index.ts: BullMQ bundles its own ioredis; cast the shared singleton
+    // to ConnectionOptions to bridge the duplicated type. Runtime is unchanged.
+    connection: redis as unknown as ConnectionOptions,
     prefix: "halley:worker",
   });
 

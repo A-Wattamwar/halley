@@ -13,23 +13,26 @@
 import { notFound } from "next/navigation";
 import Link from "next/link";
 import pg from "pg";
+import { basename } from "path";
 import { getSessionProjectId } from "@/lib/session";
+import { getRunnerStatus } from "@/lib/runner-status";
 import { InvariantEditor } from "./InvariantEditor";
 import type { InvariantsJson } from "./InvariantEditor";
 import { BisectPanel } from "./BisectPanel";
+import { CiPanel } from "./CiPanel";
 
 export const dynamic = "force-dynamic";
 
 // ── Postgres loader ───────────────────────────────────────────────────────
 
 interface FixtureRow {
-  id:               string;
-  project_id:       string;
-  source_run_id:    string;
-  repo_path:        string;
-  status:           string;
-  invariants_json:  unknown;
-  created_at:       string;
+  id: string;
+  project_id: string;
+  source_run_id: string;
+  repo_path: string;
+  status: string;
+  invariants_json: unknown;
+  created_at: string;
 }
 
 function getPool(): pg.Pool {
@@ -81,7 +84,7 @@ function fmtDate(iso: string): string {
 function StatusChip({ status }: { status: string }) {
   const map: Record<string, string> = {
     proposing: "bg-amber-900/50 text-amber-300 border border-amber-800",
-    ready:     "bg-green-900/50 text-green-300 border border-green-800",
+    ready: "bg-green-900/50 text-green-300 border border-green-800",
   };
   const cls = map[status] ?? "bg-gray-800 text-gray-400 border border-gray-700";
   return (
@@ -92,6 +95,28 @@ function StatusChip({ status }: { status: string }) {
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────
+
+function RunnerPill({ connected }: { connected: boolean }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-xs font-medium ${connected
+        ? "bg-green-900/40 text-green-300 border border-green-800"
+        : "bg-gray-800 text-gray-400 border border-gray-700"
+        }`}
+      title={
+        connected
+          ? "A host runner is connected — Run CI / Run bisect execute here."
+          : "No host runner detected — actions show the terminal command to copy."
+      }
+    >
+      <span
+        className={`inline-block w-1.5 h-1.5 rounded-full ${connected ? "bg-green-400" : "bg-gray-500"
+          }`}
+      />
+      Runner: {connected ? "connected" : "not detected"}
+    </span>
+  );
+}
 
 interface PageProps {
   params: { id: string };
@@ -115,6 +140,12 @@ export default async function FixtureEditPage({ params }: PageProps) {
 
   const runHex = fixture.source_run_id.toLowerCase();
 
+  // Runner presence (D54): drives whether CI/bisect execute here or show the
+  // copy-paste command. Read once at render (Server Component, D-11).
+  const runner = await getRunnerStatus();
+  // Fixture slug = basename of repo_path (matches the worker's deriveSlug).
+  const fixtureSlug = basename(fixture.repo_path, ".json");
+
   return (
     <main className="min-h-screen bg-gray-950 text-gray-100 p-8">
       <div className="max-w-4xl mx-auto">
@@ -132,6 +163,9 @@ export default async function FixtureEditPage({ params }: PageProps) {
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-white">Edit Fixture</h1>
             <StatusChip status={fixture.status} />
+            <span className="ml-auto">
+              <RunnerPill connected={runner.connected} />
+            </span>
           </div>
           <p className="mt-2 text-sm text-gray-500 font-mono">
             {fixture.repo_path}
@@ -174,12 +208,20 @@ export default async function FixtureEditPage({ params }: PageProps) {
           />
         )}
 
-        {/* Bisect panel — always visible once the fixture has a repo_path */}
+        {/* CI + Bisect panels — visible once the fixture has a repo_path */}
         {fixture.repo_path && (
-          <div className="mt-8">
+          <div className="mt-8 space-y-6">
+            <CiPanel
+              fixtureId={fixture.id}
+              fixturePath={fixture.repo_path}
+              fixtureSlug={fixtureSlug}
+              runnerConnected={runner.connected}
+            />
             <BisectPanel
               fixtureId={fixture.id}
               fixturePath={fixture.repo_path}
+              fixtureSlug={fixtureSlug}
+              runnerConnected={runner.connected}
             />
           </div>
         )}

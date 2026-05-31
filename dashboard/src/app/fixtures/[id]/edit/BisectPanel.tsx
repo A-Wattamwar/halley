@@ -26,12 +26,20 @@ interface BisectJob {
 interface BisectPanelProps {
   fixtureId: string;
   fixturePath: string;
+  fixtureSlug: string;
+  runnerConnected: boolean;
 }
 
-export function BisectPanel({ fixtureId, fixturePath }: BisectPanelProps) {
-  const [job, setJob]         = useState<BisectJob | null>(null);
+export function BisectPanel({
+  fixtureId,
+  fixturePath,
+  fixtureSlug,
+  runnerConnected,
+}: BisectPanelProps) {
+  const [job, setJob] = useState<BisectJob | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   // ── Poll while running ──────────────────────────────────────────────────
 
@@ -91,12 +99,27 @@ export function BisectPanel({ fixtureId, fixturePath }: BisectPanelProps) {
 
   const isTerminal = !job || job.status === "done" || job.status === "failed";
 
+  // Copy-paste command shown when no host runner is connected (D-23). The repo
+  // path lives in the fixture row (target_repo_path) and is resolved by the CLI
+  // at run time; show a placeholder the user fills with their agent repo.
+  const command = `halley bisect ${fixtureSlug} --repo <target_repo_path>`;
+
+  async function handleCopy() {
+    try {
+      await navigator.clipboard.writeText(command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard may be unavailable; the command is still visible below
+    }
+  }
+
   function StatusBadge({ status }: { status: BisectJob["status"] }) {
     const map: Record<BisectJob["status"], string> = {
-      queued:  "bg-gray-700 text-gray-300",
+      queued: "bg-gray-700 text-gray-300",
       running: "bg-blue-900/60 text-blue-300 animate-pulse",
-      done:    "bg-green-900/50 text-green-300",
-      failed:  "bg-red-900/50 text-red-300",
+      done: "bg-green-900/50 text-green-300",
+      failed: "bg-red-900/50 text-red-300",
     };
     return (
       <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${map[status]}`}>
@@ -117,14 +140,47 @@ export function BisectPanel({ fixtureId, fixturePath }: BisectPanelProps) {
             <span className="font-mono text-gray-400">{fixturePath}</span>
           </p>
         </div>
-        <button
-          onClick={handleTrigger}
-          disabled={loading || !isTerminal}
-          className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
-        >
-          {loading ? "Queuing…" : "Run bisect"}
-        </button>
+        {runnerConnected ? (
+          <button
+            onClick={handleTrigger}
+            disabled={loading || !isTerminal}
+            className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
+          >
+            {loading ? "Queuing…" : "Run bisect"}
+          </button>
+        ) : (
+          <button
+            onClick={handleCopy}
+            className="px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-gray-200 text-sm font-medium transition-colors"
+          >
+            {copied ? "Copied" : "Copy command"}
+          </button>
+        )}
       </div>
+
+      {/* When no runner is connected, always show the command (D-23). */}
+      {!runnerConnected && (
+        <div className="mb-4">
+          <p className="mb-2 text-xs text-amber-400">
+            No runner detected — run this in your terminal, or start a host
+            runner to execute it here.
+          </p>
+          <div className="p-3 rounded-lg bg-gray-950 border border-gray-800">
+            <div className="flex items-center justify-between gap-2 mb-1.5">
+              <p className="text-xs text-gray-500">Run in your terminal:</p>
+              <button
+                onClick={handleCopy}
+                className="text-xs px-2 py-0.5 rounded bg-gray-800 hover:bg-gray-700 text-gray-300 transition-colors"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>
+            </div>
+            <pre className="text-xs text-indigo-300 font-mono whitespace-pre-wrap break-all">
+              {command}
+            </pre>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div className="mb-4 p-3 rounded-lg bg-red-900/30 border border-red-800 text-sm text-red-300">

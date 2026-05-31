@@ -24,7 +24,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_repr::Serialize_repr;
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 use uuid::Uuid;
 
 // ---------------------------------------------------------------------------
@@ -340,32 +339,16 @@ fn hash_body(
 /// Two objects that differ only in key order produce identical output and
 /// therefore identical SHA-256 hashes. This is the acceptance bar verified
 /// by the `canonical_json_key_order` unit test.
-pub fn canonicalize_json(value: &Value) -> String {
-    match value {
-        Value::Object(map) => {
-            // Collect into a BTreeMap to sort keys.
-            let sorted: BTreeMap<&str, &Value> = map.iter().map(|(k, v)| (k.as_str(), v)).collect();
-            let inner: Vec<String> = sorted
-                .iter()
-                .map(|(k, v)| {
-                    format!(
-                        "{}:{}",
-                        serde_json::to_string(k).expect("key serialization"),
-                        canonicalize_json(v)
-                    )
-                })
-                .collect();
-            format!("{{{}}}", inner.join(","))
-        }
-        Value::Array(arr) => {
-            let inner: Vec<String> = arr.iter().map(canonicalize_json).collect();
-            format!("[{}]", inner.join(","))
-        }
-        // Primitives: delegate to serde_json which produces compact output
-        // and preserves Number exactly.
-        other => serde_json::to_string(other).expect("primitive serialization"),
-    }
-}
+///
+/// # Single source of truth (Phase 6 Week 11 Day 1)
+///
+/// The implementation now lives in the `halley-canonical` crate so the D22
+/// algorithm has exactly one Rust home (previously triplicated: here, the CLI
+/// `canonical-hash` bin, and the Python sibling). This is a `pub use`
+/// re-export — byte-for-byte identical behavior, same public signature
+/// `canonicalize_json(&Value) -> String`. Callers in this crate
+/// (`domain/canonical.rs`, `hash_body` below) are unchanged. See D22, D54.
+pub use halley_canonical::canonicalize_json;
 
 // ---------------------------------------------------------------------------
 // Unit tests
