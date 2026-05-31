@@ -1253,3 +1253,74 @@ Braintrust's SDK wrapper).
 
 **Impact on Week 10:** the shim now ships record mode (production capture) in
 addition to replay mode. Plan updated in `docs/plan/phase-5-overview.md`.
+
+---
+
+## 2026-05-31 — Phase 6 Week 11 Day 1
+
+### D54. Dashboard enqueues + displays; a host-side runner (the worker on the host) executes CI and bisect; terminal commands are always shown.
+
+**Context.** Phase 5 shipped the hero loop end-to-end *from the terminal*
+(`~/halley-hero-demo/demo.sh`: ci → regression → bisect, 6.6 s, $0). The dashboard
+does the *promote and edit* half perfectly, but the *execution* half — `halley ci`
+and `halley bisect` — only works from the CLI. The dashboard's "Run bisect" button
+is a fragile stub: it shells out to a host binary via hardcoded `/Users/...` paths
+from inside a Node container that has neither the Rust binary, the user's git repo,
+the agent's Python venv, nor `halley.config.json`.
+
+**Why this is architecture, not a bug.** `halley bisect` checks out old commits of
+*the user's agent code* and re-runs *the user's agent* (their Python, venv, deps) at
+each commit. No generic server container can contain an arbitrary user's agent +
+environment — this is exactly why `git bisect`, GitHub self-hosted runners, and
+Buildkite agents all execute **where the code lives**. The fix is the
+industry-standard **runner/agent pattern**: the dashboard enqueues and displays;
+a runner on the machine with the repo executes and streams results back.
+
+**Decision.**
+
+- **The worker is the runner, split by job type (v1 model — locked):**
+  - **Docker worker** handles the **code-only jobs** that need only
+    Postgres/ClickHouse/Redis: `invariant.infer` and `fixture.write`. These work out
+    of the box with `docker compose up` — promote and edit need zero host setup.
+  - **Host worker** handles the **repo-touching jobs** that need the user's git repo,
+    agent venv, CLI binary, and `halley.config.json`: `ci.run` (new, Day 3) and
+    `bisect.run`. Run on the host (`npm run dev` in `worker/`, env pointed at
+    `localhost:5433 / :6380 / :8123`).
+  - **Routing:** jobs are split across two BullMQ queue groups so a Docker worker and
+    a host worker can run simultaneously without stealing each other's jobs. The
+    Docker worker subscribes to `invariant.infer` + `fixture.write`; the host worker
+    subscribes to `ci.run` + `bisect.run`. Implemented via separate `Worker`
+    registrations keyed by queue name (already the pattern in `worker/src/index.ts`),
+    launched via an env flag `HALLEY_WORKER_ROLE=docker|host|all`.
+  - **v1 simplest-path alternative (documented):** one host worker subscribing to
+    **all four** queues (`HALLEY_WORKER_ROLE=all`) is acceptable for v1 if the split
+    adds friction — but the dev docs must state clearly which model is in use. The
+    default documented model is the role-split above.
+- **Per-fixture execution context** (new DB columns, Day 2) tells the host worker
+  *which git repo* and *which `halley.config.json`* a fixture belongs to. No hardcoded
+  paths, no slug-guessing.
+- **Reachability is explicit.** A host worker writes a Redis heartbeat
+  (`halley:runner:heartbeat`, short TTL) on a timer. The dashboard reads it: runner
+  present → CI/bisect buttons execute and stream results; runner absent → buttons
+  switch to **"Copy command"** showing the exact `halley` invocation. Never a silent
+  failure, never a fake "running" state.
+- **Honest degradation:** if a repo-touching job is enqueued with no host runner
+  available, it resolves to status `needs_runner` with the copy-paste command in the
+  log — surfaced in the UI, not a crash or a hang.
+- **Terminal commands are first-class UX (never hidden).** Every dashboard action that
+  can run in the terminal shows the exact `halley` command with a copy button. This is
+  required, not a fallback (see discipline D-23).
+
+**Product story after Phase 6.** *The dashboard drives the whole loop. A lightweight
+Halley runner on your machine executes the parts that need your code (CI + bisect).
+Prefer the terminal? Every action shows the exact `halley` command to copy.* We do
+**not** claim "our SaaS container runs your Python agent." v1 is: self-hosted Halley +
+runner on the machine with the agent repo, **or** the terminal, with commands shown in
+the UI.
+
+**Tradeoff.** Users must run a runner locally for one-click dashboard CI/bisect.
+Mitigated by (1) the dev path being "just run the worker on the host" — the worker
+already reads every connection from env vars with `localhost` defaults, so launching it
+on the host is near-zero-code; (2) always-visible terminal commands; (3) the existing
+GitHub Action covering the CI half in real PRs. Superseded only if a future
+sandboxed-execution design (e.g. ephemeral per-repo containers) proves safe and general.

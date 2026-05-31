@@ -1,0 +1,146 @@
+##############################################################################
+# ci.yml — Halley's own project CI (distinct from halley-ci.yml, which replays
+# fixtures). This builds/lints/tests the codebase and permanently guards the
+# D22 canonical-hash contract across the Phase 6 halley-canonical extraction.
+#
+# Layout note: there is NO root Cargo workspace (D4/D21/D29) — halley-canonical/,
+# ingester/, and cli/ are independent crates with separate Cargo.lock files, so
+# cargo runs PER-CRATE. Rust is pinned to 1.85 (D28).
+#
+# Jobs:
+#   rust   — per-crate build + clippy -D warnings + fmt --check + test
+#   node   — dashboard `npm ci && npm run build`; worker `npm ci && tsc --noEmit`
+#   parity — Python 3.13 + Rust: the D22 Python↔Rust canonical-hash parity test
+#            (the permanent guard against drift between sdk-py and halley-canonical)
+##############################################################################
+
+name: Halley CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Rust: per-crate (no root workspace) ────────────────────────────────────
+  rust:
+    name: Rust (${{ matrix.crate }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate: [halley-canonical, ingester, cli]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.85 (pinned — D28)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+          components: clippy, rustfmt
+
+      - name: Cache cargo registry + per-crate target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            ${{ matrix.crate }}/target
+          key: ${{ runner.os }}-cargo-${{ matrix.crate }}-${{ hashFiles(format('{0}/Cargo.lock', matrix.crate)) }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-${{ matrix.crate }}-
+
+      - name: Build
+        working-directory: ${{ matrix.crate }}
+        run: cargo build --all-targets
+
+      - name: Clippy (deny warnings)
+        working-directory: ${{ matrix.crate }}
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Format check
+        working-directory: ${{ matrix.crate }}
+        run: cargo fmt --check
+
+      - name: Test
+        working-directory: ${{ matrix.crate }}
+        run: cargo test
+
+  # ── Node: dashboard build + worker type-check ──────────────────────────────
+  node:
+    name: Node (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        project: [dashboard, worker]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: ${{ matrix.project }}/package-lock.json
+
+      - name: Install deps
+        working-directory: ${{ matrix.project }}
+        run: npm ci
+
+      # Dashboard: full production build. Worker: type-check only (no build
+      # script; tsx runs it at runtime). Piece 1 (Day 4) made worker tsc clean.
+      - name: Build (dashboard) / type-check (worker)
+        working-directory: ${{ matrix.project }}
+        run: |
+          if [ "${{ matrix.project }}" = "dashboard" ]; then
+            npm run build
+          else
+            npx tsc --noEmit
+          fi
+
+  # ── Parity: D22 Python↔Rust canonical-hash guard ──────────────────────────
+  parity:
+    name: D22 canonical parity (Python ↔ Rust)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust 1.85 (pinned — D28)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: "1.85"
+
+      - name: Cache cargo registry + cli target
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            cli/target
+          key: ${{ runner.os }}-cargo-cli-${{ hashFiles('cli/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-cli-
+
+      - name: Build canonical-hash binary
+        working-directory: cli
+        run: cargo build --release --bin canonical-hash
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+          cache-dependency-path: sdk-py/pyproject.toml
+
+      - name: Install sdk-py + pytest
+        run: pip install --quiet -e "sdk-py/[dev]"
+
+      - name: Run D22 parity test (the permanent drift guard)
+        run: python -m pytest sdk-py/tests/test_rust_parity.py -v

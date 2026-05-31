@@ -741,6 +741,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "halley-canonical"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "halley-ingester"
 version = "0.1.0"
 dependencies = [
@@ -750,6 +758,7 @@ dependencies = [
  "chrono",
  "clickhouse",
  "deadpool-postgres",
+ "halley-canonical",
  "hex",
  "metrics",
  "metrics-exporter-prometheus",
