@@ -1,0 +1,16 @@
+flowchart TD
+    app["Your AI app<br/>OpenLLMetry · OpenInference · Vercel AI SDK · OTEL GenAI · halley-raw"]
+    app -->|"OTLP/gRPC :4317 · OTLP/HTTP :4318 · POST /v1/spans/json"| ingester
+
+    subgraph ingester["Rust Ingester"]
+        normalizer["Normalizer<br/>halley-raw · openllmetry · openinference · vercel-ai · otel-genai"]
+    end
+
+    ingester -->|CanonicalSpan| redis["Redis Streams<br/>(halley:spans)"]
+    redis --> writer["Writer Task<br/>(same binary)"]
+    writer --> clickhouse[("ClickHouse<br/>observations · bodies · pricing")]
+    writer --> postgres[("Postgres<br/>auth · projects · API keys · jobs")]
+    clickhouse --> dashboard["Next.js Dashboard"]
+    postgres --> dashboard
+    dashboard -->|promote| fixtures["halley/fixtures/<br/>in your repo"]
+    fixtures --> ci["halley ci<br/>(replay + bisect)"]

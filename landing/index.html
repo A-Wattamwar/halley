@@ -245,6 +245,16 @@
     </div>
   </section>
 
+  <section id="arch">
+    <h2>Architecture</h2>
+    <p class="section-sub">Your app emits OTLP spans. Halley captures, stores, and replays them.</p>
+    <div class="demo" style="box-shadow:none; background:var(--panel-2); padding:12px; border-radius:12px; text-align:center;">
+      <img src="../docs/diagrams/architecture.png"
+           alt="Halley architecture: OTLP spans flow from your AI app into the Rust ingester, through Redis Streams to the writer, into ClickHouse and Postgres, up to the Next.js dashboard, which promotes runs to fixtures in your repo for halley ci replay and bisect"
+           style="max-width:480px; width:100%; height:auto; border-radius:8px;" />
+    </div>
+  </section>
+
   <section id="tiers">
     <h2>Two tiers of capture</h2>
     <p class="section-sub">Halley is honest about what it captures, because it changes what you get.</p>

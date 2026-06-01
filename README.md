@@ -10,8 +10,6 @@ Halley records your production agent runs as bit-fidelity cassettes, turns any r
 
 Self-hosted. OpenTelemetry-native. Built for the era where your model keeps changing under you.
 
-> **Status:** Pre-alpha, active development through August 2026. Progress in [`docs/ROADMAP.md`](docs/ROADMAP.md).
-
 ---
 
 ## Two tiers of capture (read this first)
@@ -55,14 +53,10 @@ Full model — which worker runs what, host vs. in-network ports, starting a hos
 
 ## Proof: CI on every PR
 
-Halley ships a GitHub Action ([`.github/workflows/halley-ci.yml`](.github/workflows/halley-ci.yml)) that replays the fixture library in **pure mode ($0, no live calls)** on every pull request, publishes JUnit results as a PR check, and on failure posts a comment with the `halley diff` and `halley bisect` commands to investigate. A second workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) builds and tests the codebase and permanently guards the D22 canonical-hash contract with a Python↔Rust parity check.
+[![Halley CI](https://github.com/A-Wattamwar/halley/actions/workflows/ci.yml/badge.svg)](https://github.com/A-Wattamwar/halley/actions/workflows/ci.yml)
+[![Fixture Replay ($0)](https://github.com/A-Wattamwar/halley/actions/workflows/halley-ci.yml/badge.svg)](https://github.com/A-Wattamwar/halley/actions/workflows/halley-ci.yml)
 
-<!-- [AYUSH] Green-CI proof link. The phase-6-week-11 PR (#1) is merged to main, so both
-     workflows have run — but I could not verify the conclusion from here (no `gh`, and the
-     repo is currently PRIVATE so the run/badge is not publicly reachable). Before launch:
-     1) confirm the latest run is green, 2) make the repo public (or the run viewable),
-     3) paste the run URL below and/or add a status badge. Do NOT claim "green" until verified. -->
-> ▶︎ **Latest CI run:** _link pending — see the note in the README source (verify green + make the run public before launch)._
+Halley ships a GitHub Action ([`.github/workflows/halley-ci.yml`](.github/workflows/halley-ci.yml)) that replays the fixture library in **pure mode ($0, no live calls)** on every pull request, publishes JUnit results as a PR check, and on failure posts a comment with the `halley diff` and `halley bisect` commands to investigate. A second workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) builds and tests the codebase and permanently guards the D22 canonical-hash contract with a Python↔Rust parity check.
 
 ---
 
@@ -138,50 +132,23 @@ Halley is not a Langfuse or Laminar replacement. It is the regression-testing lo
 
 ## Architecture at a glance
 
-```
-Your AI app (OpenLLMetry / OpenInference / Vercel AI SDK / OTEL GenAI / halley-raw)
-        │
-        │  OTLP/gRPC :4317   OTLP/HTTP :4318   POST /v1/spans/json
-        └──────────────────────────┬──────────────────────────────
-                                   ▼
-                        ┌─────────────────────┐
-                        │   Rust Ingester      │
-                        │                     │
-                        │  ┌───────────────┐  │
-                        │  │  Normalizer   │  │
-                        │  │               │  │
-                        │  │ halley-raw    │  │
-                        │  │ openllmetry   │  │
-                        │  │ openinference │  │
-                        │  │ vercel-ai     │  │
-                        │  │ otel-genai    │  │
-                        │  └──────┬────────┘  │
-                        └─────────┼───────────┘
-                                  │ CanonicalSpan
-                                  ▼
-                        Redis Streams (halley:spans)
-                                  │
-                                  ▼
-                        ┌─────────────────────┐
-                        │   Writer Task        │
-                        │  (same binary)       │
-                        └─────────┬───────────┘
-                                  │
-                    ┌─────────────┴──────────────┐
-                    ▼                            ▼
-             ClickHouse                      Postgres
-         (observations,                  (auth, projects,
-          bodies, pricing)                API keys, jobs)
-                    │                            │
-                    └─────────────┬──────────────┘
-                                  ▼
-                        Next.js Dashboard
-                                  │
-                                  ▼
-                    halley/fixtures/ in your repo
-                                  │
-                                  ▼
-                    halley ci (replay + bisect)
+```mermaid
+flowchart TD
+    app["Your AI app<br/>OpenLLMetry · OpenInference · Vercel AI SDK · OTEL GenAI · halley-raw"]
+    app -->|"OTLP/gRPC :4317 · OTLP/HTTP :4318 · POST /v1/spans/json"| ingester
+
+    subgraph ingester["Rust Ingester"]
+        normalizer["Normalizer<br/>halley-raw · openllmetry · openinference · vercel-ai · otel-genai"]
+    end
+
+    ingester -->|CanonicalSpan| redis["Redis Streams<br/>(halley:spans)"]
+    redis --> writer["Writer Task<br/>(same binary)"]
+    writer --> clickhouse[("ClickHouse<br/>observations · bodies · pricing")]
+    writer --> postgres[("Postgres<br/>auth · projects · API keys · jobs")]
+    clickhouse --> dashboard["Next.js Dashboard"]
+    postgres --> dashboard
+    dashboard -->|promote| fixtures["halley/fixtures/<br/>in your repo"]
+    fixtures --> ci["halley ci<br/>(replay + bisect)"]
 ```
 
 Full system design in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
@@ -315,8 +282,8 @@ MIT. See [`LICENSE`](LICENSE).
 
 ---
 
-## Author
+## Authors
 
-Built by [Ayush Wattamwar](https://ayushwattamwar.com), CS at Arizona State University.
+Built by [Ayush Wattamwar](https://ayushwattamwar.com) and [Hridaya Dande](https://hridayadande.com/). We built this together.
 
 Named after Edmond Halley, who turned a noisy archive of past observations into a reliable prediction of the future. Which is what this tool does for agents.

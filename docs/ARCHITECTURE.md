@@ -44,74 +44,24 @@ Halley converts any production agent run into a **cassette**: a bit-fidelity rec
 
 ## 2. High-level architecture
 
-```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                          Customer AI application                          │
-│   (OpenAI SDK / Anthropic SDK / LangChain / Vercel AI SDK / custom)      │
-│   Instrumented via OpenLLMetry, OpenInference, OTEL GenAI, or @halley/sdk │
-└────────────────────────────┬──────────────────────────────────────────────┘
-                             │  OTLP/gRPC  :4317
-                             │  OTLP/HTTP  :4318  (protobuf or JSON)
-                             ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                   Halley Ingester  (Rust, axum + tonic)                   │
-│  • Accepts OTLP over gRPC and HTTP                                        │
-│  • Normalizes per-source attributes into Halley's canonical schema         │
-│  • Captures cassette payload (raw request/response bodies)                │
-│  • Groups spans into agent runs via four-tier heuristic                   │
-│  • Publishes to Redis Streams                                             │
-└────────────────────────────┬──────────────────────────────────────────────┘
-                             │  XADD halley:spans *
-                             ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                            Redis Streams (buffer)                          │
-└────────────────────────────┬──────────────────────────────────────────────┘
-                             │  XREADGROUP halley:writers
-                             ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                       Halley Writer  (same Rust binary)                    │
-│  • Batches 500 rows or every 100 ms                                       │
-│  • Writes observations (thin columns) to ClickHouse                       │
-│  • Writes cassette payloads (raw bodies) to ClickHouse contents table      │
-│  • ACKs on success, dead-letters to Redis DLQ stream on failure           │
-└────────────────────────────┬──────────────────────────────────────────────┘
-                             │
-        ┌────────────────────┴───────────────────┐
-        ▼                                        ▼
-┌────────────────────────────┐     ┌────────────────────────────────────────┐
-│  ClickHouse                │     │  Postgres                              │
-│  • halley.observations     │     │  • users, projects, api_keys           │
-│  • halley.observation_body │     │  • fixture_metadata (pointer to repo)   │
-│  • halley.pricing_versions │     │  • bisect_jobs                         │
-└────────────────────────────┘     └────────────────────────────────────────┘
-        │                                        │
-        └────────────────────┬───────────────────┘
-                             ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                   Halley Dashboard  (Next.js 14, App Router)              │
-│  • Runs list, run detail with reasoning graph                             │
-│  • "Turn this run into a test" flow                                       │
-│  • Invariant editor (accept / edit / reject inferred invariants)          │
-│  • Live run streaming via Redis Pub/Sub                                   │
-│  • Bisect UI shows the failing fixture and the commit responsible         │
-└──────────────────────────────────────────────────────────────────────────┘
-        │
-        │ Promotes to
-        ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│           halley/fixtures/ in the user's Git repository                    │
-│  fixtures/<slug>.json        (cassette index, invariants, metadata)       │
-│  fixtures/<slug>/bodies/     (content-addressed LLM/tool payload blobs)   │
-└──────────────────────────────────────────────────────────────────────────┘
-        │
-        │ Consumed by
-        ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│              halley CLI + GitHub Action (Rust binary)                      │
-│  halley ci            replay entire fixture library                        │
-│  halley record        promote a local run to a fixture                    │
-│  halley bisect <id>   binary-search commits for the invariant break       │
-└──────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    app["Customer AI application<br/>(OpenAI / Anthropic / LangChain / Vercel AI SDK / custom)<br/>instrumented via OpenLLMetry, OpenInference, or OTEL GenAI"]
+    app -->|"OTLP/gRPC :4317 · OTLP/HTTP :4318 (protobuf or JSON)"| ingester
+
+    ingester["<b>Halley Ingester</b> (Rust, axum + tonic)<br/>accepts OTLP · normalizes to canonical schema<br/>captures raw request/response bodies · groups spans into runs<br/>publishes to Redis Streams"]
+    ingester -->|"XADD halley:spans"| redis["Redis Streams (buffer)"]
+    redis -->|"XREADGROUP halley:writers"| writer
+
+    writer["<b>Halley Writer</b> (same Rust binary)<br/>batches 500 rows / 100 ms · ACK on success<br/>dead-letters to Redis DLQ on failure"]
+    writer --> clickhouse[("<b>ClickHouse</b><br/>observations · observation_body · pricing_versions")]
+    writer --> postgres[("<b>Postgres</b><br/>users · projects · api_keys · fixtures · bisect_jobs")]
+
+    clickhouse --> dashboard
+    postgres --> dashboard
+    dashboard["<b>Halley Dashboard</b> (Next.js 14, App Router)<br/>runs list + reasoning graph · 'Turn this run into a test'<br/>invariant editor · live streaming (Redis Pub/Sub)<br/>Run CI / Run bisect (via host runner)"]
+    dashboard -->|promotes to| fixtures["<b>halley/fixtures/</b> in your Git repo<br/>&lt;slug&gt;.json (index, invariants) · bodies/ (content-addressed blobs)"]
+    fixtures -->|consumed by| cli["<b>halley CLI + GitHub Action</b> (Rust)<br/>halley ci · halley record · halley diff · halley bisect"]
 ```
 
 ### 2.1 Data flow in one sentence
