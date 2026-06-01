@@ -9,7 +9,7 @@
  *   Schema    — per-span key-path/type map; each key can be toggled
  *               required ↔ optional or removed entirely.
  *   Metric    — editable numeric bounds (cost, latency, tokens).
- *   Semantic  — disabled/read-only (runner is Phase 6).
+ *   Semantic  — disabled/read-only (runner is future work).
  *
  * Save: POST /api/fixtures/[id] with the current edited state.
  */
@@ -19,17 +19,17 @@ import { useState } from "react";
 // ── Shared invariant types (mirrors worker/src/jobs/invariant-infer.ts) ──────
 
 export interface StructuralInvariants {
-  span_count:             number;
-  operation_sequence:     string[];
+  span_count: number;
+  operation_sequence: string[];
   /** New field added by editor — not present in raw worker output; defaults to "exact". */
   operation_sequence_mode?: "exact" | "subsequence";
-  required_operations:    string[];
-  parent_index:           Array<number | null>;
+  required_operations: string[];
+  parent_index: Array<number | null>;
 }
 
 export interface SpanSchemaEntry {
-  op:            string;
-  key_types:     Record<string, string>;
+  op: string;
+  key_types: Record<string, string>;
   required_keys: string[];
 }
 
@@ -38,30 +38,30 @@ export interface SchemaInvariants {
 }
 
 export interface MetricInvariants {
-  cost_max_usd:      number;
-  latency_max_ms:    number;
-  span_count:        number;
-  input_tokens_max:  number;
+  cost_max_usd: number;
+  latency_max_ms: number;
+  span_count: number;
+  input_tokens_max: number;
   output_tokens_max: number;
 }
 
 export interface SemanticInvariant {
-  enabled:     boolean;
+  enabled: boolean;
   judge_model: string | null;
-  rubric:      string | null;
+  rubric: string | null;
 }
 
 export interface InvariantsJson {
   structural?: StructuralInvariants;
-  schema?:     SchemaInvariants;
-  metric?:     MetricInvariants;
-  semantic?:   SemanticInvariant;
+  schema?: SchemaInvariants;
+  metric?: MetricInvariants;
+  semantic?: SemanticInvariant;
 }
 
 // ── Props ─────────────────────────────────────────────────────────────────
 
 interface Props {
-  fixtureId:         string;
+  fixtureId: string;
   initialInvariants: InvariantsJson;
 }
 
@@ -73,9 +73,9 @@ function SectionCard({
   children,
   onRemove,
 }: {
-  title:     string;
-  badge?:    string;
-  children:  React.ReactNode;
+  title: string;
+  badge?: string;
+  children: React.ReactNode;
   onRemove?: () => void;
 }) {
   return (
@@ -111,15 +111,14 @@ function Tag({
   mono,
   onRemove,
 }: {
-  label:     string;
-  mono?:     boolean;
+  label: string;
+  mono?: boolean;
   onRemove?: () => void;
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs ${
-        mono ? "font-mono" : ""
-      } bg-gray-800 text-gray-300 border border-gray-700`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs ${mono ? "font-mono" : ""
+        } bg-gray-800 text-gray-300 border border-gray-700`}
     >
       {label}
       {onRemove && (
@@ -142,11 +141,11 @@ function NumericInput({
   step,
   min,
 }: {
-  label:    string;
-  value:    number;
+  label: string;
+  value: number;
   onChange: (v: number) => void;
-  step?:    number;
-  min?:     number;
+  step?: number;
+  min?: number;
 }) {
   return (
     <label className="flex items-center justify-between gap-4">
@@ -175,7 +174,7 @@ function StructuralSection({
   onChange,
   onReject,
 }: {
-  data:     StructuralInvariants;
+  data: StructuralInvariants;
   onChange: (next: StructuralInvariants) => void;
   onReject: () => void;
 }) {
@@ -224,11 +223,10 @@ function StructuralSection({
                 onClick={() =>
                   onChange({ ...data, operation_sequence_mode: m })
                 }
-                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize ${
-                  mode === m
-                    ? "bg-blue-700 text-white"
-                    : "text-gray-400 hover:text-gray-200"
-                }`}
+                className={`px-2.5 py-1 rounded-md text-xs font-medium transition-colors capitalize ${mode === m
+                  ? "bg-blue-700 text-white"
+                  : "text-gray-400 hover:text-gray-200"
+                  }`}
               >
                 {m}
               </button>
@@ -299,7 +297,7 @@ function SchemaSection({
   onChange,
   onReject,
 }: {
-  data:     SchemaInvariants;
+  data: SchemaInvariants;
   onChange: (next: SchemaInvariants) => void;
   onReject: () => void;
 }) {
@@ -324,7 +322,7 @@ function SchemaSection({
   const removeKey = (op: string, key: string) =>
     updateSpan(op, (s) => ({
       ...s,
-      key_types:     Object.fromEntries(
+      key_types: Object.fromEntries(
         Object.entries(s.key_types).filter(([k]) => k !== key)
       ),
       required_keys: s.required_keys.filter((k) => k !== key),
@@ -373,14 +371,12 @@ function SchemaSection({
                                 ? "Click to make optional"
                                 : "Click to make required"
                             }
-                            className={`w-9 h-5 rounded-full transition-colors ${
-                              isRequired ? "bg-blue-600" : "bg-gray-700"
-                            }`}
+                            className={`w-9 h-5 rounded-full transition-colors ${isRequired ? "bg-blue-600" : "bg-gray-700"
+                              }`}
                           >
                             <span
-                              className={`block w-3.5 h-3.5 rounded-full bg-white transition-transform mx-auto ${
-                                isRequired ? "translate-x-2" : "-translate-x-2"
-                              }`}
+                              className={`block w-3.5 h-3.5 rounded-full bg-white transition-transform mx-auto ${isRequired ? "translate-x-2" : "-translate-x-2"
+                                }`}
                             />
                           </button>
                         </td>
@@ -411,7 +407,7 @@ function MetricSection({
   onChange,
   onReject,
 }: {
-  data:     MetricInvariants;
+  data: MetricInvariants;
   onChange: (next: MetricInvariants) => void;
   onReject: () => void;
 }) {
@@ -463,7 +459,7 @@ function SemanticSection({ data }: { data: SemanticInvariant }) {
         <span className="w-8 h-5 rounded-full bg-gray-700 inline-block relative">
           <span className="absolute left-0.5 top-0.5 w-4 h-4 rounded-full bg-gray-500 block" />
         </span>
-        <span>Disabled — semantic invariants are Phase 6</span>
+        <span>Disabled — semantic invariants are on the roadmap (not yet available)</span>
       </div>
       {data.rubric && (
         <p className="text-xs text-gray-600 italic mt-1">
@@ -481,10 +477,10 @@ export function InvariantEditor({ fixtureId, initialInvariants }: Props) {
     ...initialInvariants,
     structural: initialInvariants.structural
       ? {
-          ...initialInvariants.structural,
-          operation_sequence_mode:
-            initialInvariants.structural.operation_sequence_mode ?? "exact",
-        }
+        ...initialInvariants.structural,
+        operation_sequence_mode:
+          initialInvariants.structural.operation_sequence_mode ?? "exact",
+      }
       : undefined,
   }));
 
@@ -521,9 +517,9 @@ export function InvariantEditor({ fixtureId, initialInvariants }: Props) {
     setErrorMsg("");
     try {
       const res = await fetch(`/api/fixtures/${fixtureId}`, {
-        method:  "POST",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ invariants_json: inv }),
+        body: JSON.stringify({ invariants_json: inv }),
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -624,11 +620,10 @@ export function InvariantEditor({ fixtureId, initialInvariants }: Props) {
           <button
             onClick={handleSave}
             disabled={saveState === "saving"}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
-              saveState === "saving"
-                ? "bg-gray-800 text-gray-500 border-gray-700 cursor-not-allowed"
-                : "bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700"
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${saveState === "saving"
+              ? "bg-gray-800 text-gray-500 border-gray-700 cursor-not-allowed"
+              : "bg-gray-800 hover:bg-gray-700 text-gray-200 border-gray-700"
+              }`}
           >
             {saveState === "saving" ? "Saving…" : "Save invariants"}
           </button>
@@ -637,17 +632,16 @@ export function InvariantEditor({ fixtureId, initialInvariants }: Props) {
           <button
             onClick={handleWrite}
             disabled={writeState === "enqueuing" || writeState === "queued"}
-            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${
-              writeState === "enqueuing" || writeState === "queued"
-                ? "bg-violet-900 text-violet-400 cursor-not-allowed"
-                : "bg-violet-600 hover:bg-violet-500 text-white"
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-semibold transition-colors ${writeState === "enqueuing" || writeState === "queued"
+              ? "bg-violet-900 text-violet-400 cursor-not-allowed"
+              : "bg-violet-600 hover:bg-violet-500 text-white"
+              }`}
           >
             {writeState === "enqueuing"
               ? "Enqueuing…"
               : writeState === "queued"
-              ? "Queued ✓"
-              : "Write fixture to repo"}
+                ? "Queued ✓"
+                : "Write fixture to repo"}
           </button>
         </div>
       </div>
@@ -661,7 +655,7 @@ function RejectedBanner({
   title,
   onRestore,
 }: {
-  title:     string;
+  title: string;
   onRestore: () => void;
 }) {
   return (
