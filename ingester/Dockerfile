@@ -17,12 +17,27 @@ FROM rust:1.85-slim AS builder
 
 WORKDIR /build
 
+# NOTE: the build context is the REPO ROOT (docker-compose.yml sets
+# context: . + dockerfile: ingester/Dockerfile). This is required because the
+# ingester has a path dependency on the sibling `halley-canonical` crate
+# (../halley-canonical, see ingester/Cargo.toml + D22/D54). All COPY paths below
+# are therefore relative to the repo root, and the ingester crate is built from
+# the /build/ingester subdir so that ../halley-canonical resolves as it does on
+# the host. The root .dockerignore scopes the context to just these two crates.
+
+# Copy the sibling crate the ingester depends on. Its layout under /build must
+# mirror the host (sibling of ingester/) so the `../halley-canonical` path
+# dependency resolves unchanged.
+COPY halley-canonical/Cargo.toml halley-canonical/Cargo.lock ./halley-canonical/
+COPY halley-canonical/src ./halley-canonical/src
+
 # Cache dependency compilation separately from source compilation.
-# Copy manifests first; if only src/ changes, this layer is reused.
-COPY Cargo.toml Cargo.lock ./
+# Copy the ingester manifests first; if only src/ changes, this layer is reused.
+COPY ingester/Cargo.toml ingester/Cargo.lock ./ingester/
 
 # Create a stub main so `cargo build --release` can compile deps without
 # the real source. The stub is overwritten in the next COPY step.
+WORKDIR /build/ingester
 RUN mkdir -p src/bin \
     && echo 'fn main() {}' > src/main.rs \
     && echo 'fn main() {}' > src/bin/smoke_grpc.rs \
@@ -30,7 +45,7 @@ RUN mkdir -p src/bin \
     && rm -f target/release/deps/halley_ingester* target/release/deps/smoke_grpc*
 
 # Now copy the real source and build the final binary.
-COPY src ./src
+COPY ingester/src ./src
 RUN cargo build --release
 
 # ---- Stage 2: runtime ------------------------------------------------------
@@ -47,7 +62,7 @@ RUN groupadd --gid 10001 halley \
 
 WORKDIR /app
 
-COPY --from=builder /build/target/release/halley-ingester /app/halley-ingester
+COPY --from=builder /build/ingester/target/release/halley-ingester /app/halley-ingester
 
 # Ensure the binary is executable (should be, but be explicit).
 RUN chmod +x /app/halley-ingester

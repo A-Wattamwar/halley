@@ -1,0 +1,20 @@
+# Root build context — used ONLY by the ingester image build
+# (docker-compose.yml: ingester.build.context = ".", dockerfile = ingester/Dockerfile).
+#
+# Why a root context: the ingester depends on the sibling `halley-canonical`
+# crate via a path dependency (`../halley-canonical`, see ingester/Cargo.toml
+# and D22/D54). A `./ingester` context cannot see that sibling, so the build is
+# rooted here and we allow ONLY the two crates the ingester needs.
+#
+# Dashboard and worker keep their own subdir contexts (./dashboard, ./worker)
+# and are unaffected by this file.
+
+# Ignore everything by default, then re-include only the ingester + its crate dep.
+*
+!ingester
+!halley-canonical
+
+# Drop build artifacts and noise from the re-included trees.
+ingester/target
+halley-canonical/target
+**/.DS_Store

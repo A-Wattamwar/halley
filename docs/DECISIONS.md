@@ -1324,3 +1324,71 @@ already reads every connection from env vars with `localhost` defaults, so launc
 on the host is near-zero-code; (2) always-visible terminal commands; (3) the existing
 GitHub Action covering the CI half in real PRs. Superseded only if a future
 sandboxed-execution design (e.g. ephemeral per-repo containers) proves safe and general.
+
+---
+
+## 2026-05-31 — Phase 6 Week 12 Day 1
+
+### D55. Ingester Docker build uses a repo-root context (scoped by `.dockerignore`), not `./ingester`, so the `halley-canonical` path dependency resolves.
+
+**Context.** Week 11 Day 1 extracted the D22 canonical-JSON + SHA-256 algorithm
+into a standalone `halley-canonical/` crate (a sibling of `ingester/` and `cli/`,
+wired via a `path` dependency `halley-canonical = { path = "../halley-canonical" }`
+in `ingester/Cargo.toml` — see D22, and the Week 11 checkpoint). The change was
+built and tested **host-side** with cargo (per D-2/D-16), where `../halley-canonical`
+resolves against the real filesystem. The ingester Docker image was **never rebuilt**
+in Week 11: D-8 (no Docker rebuild on adapter-only days) and D-21 (worker Docker
+rebuild at most once per day it changes) meant nothing forced an ingester image
+rebuild, so the break stayed **latent** until the Week 12 Day 1 `docker compose up`.
+
+**The break.** The ingester `build.context` was `./ingester`. A Docker build context
+is the root of what the daemon can see, so `COPY` (and the cargo build inside) could
+not reach `../halley-canonical` — it lives *outside* `./ingester`. The build failed at
+dependency resolution:
+```
+failed to get `halley-canonical` as a dependency of package `halley-ingester`
+  failed to read `/halley-canonical/Cargo.toml`
+```
+Host cargo worked precisely because it *can* see the sibling crate; Docker could not.
+This broke `docker compose up` for **every fresh clone** — the exact one-command
+install the README now leads with.
+
+**Decision.** Build the ingester from the **repo-root context** so both crates are
+visible, preserving the on-disk sibling layout inside the image:
+
+- `docker-compose.yml`: ingester `build.context: .` + `dockerfile: ingester/Dockerfile`
+  (was `context: ./ingester`).
+- `ingester/Dockerfile`: all `COPY` paths are now root-relative. Copy
+  `halley-canonical/` (Cargo.toml + Cargo.lock + src) alongside `ingester/` under
+  `/build`, then build from the `/build/ingester` subdir so `../halley-canonical`
+  resolves byte-for-byte as it does on the host. The stub-main dependency-cache layer
+  (added pre-D15 era for fast rebuilds) is preserved; only its working directory moved
+  to `/build/ingester`. The runtime stage copies the binary from
+  `/build/ingester/target/release/halley-ingester`.
+- New root `.dockerignore`: ignore everything (`*`), then re-include only `ingester/`
+  and `halley-canonical/`, and drop `**/target` + `.DS_Store`. This keeps the larger
+  root context from ballooning (the whole repo — `dashboard/node_modules`, `.next`,
+  `.git`, demo `.mov`/`.gif`, etc. — would otherwise be sent to the daemon).
+
+**Scope.** Only the **ingester** image is affected. `cli/` is host-only (D-16) and is
+never built in Docker. `dashboard/` and `worker/` keep their own subdir contexts
+(`./dashboard`, `./worker`) — they have no path dependency on `halley-canonical` and
+are unchanged. The ingester runtime stage and its `curl` healthcheck (D15) are
+unchanged. This is a build-infrastructure fix: **no locked contract changes** (canonical
+schema, D22 algorithm, fixture format v1, D54 all untouched; D22's byte-for-byte output
+is identical — the crate is copied, not modified).
+
+**Verification.** `docker compose build ingester` succeeds with the root context, and
+`docker compose up -d` brings all six services up healthy (including the rebuilt
+ingester) — confirmed Week 12 Day 1. The full clean-state chain
+(`docker compose down -v && docker compose up -d && make ready && make smoke`) is the
+recommended pre-launch check to confirm `make smoke` passes against a from-scratch
+ingester image.
+
+**Lesson / guard.** A host-side path-dependency extraction (D22 → `halley-canonical`)
+silently invalidates any Docker image whose context excludes the new sibling crate.
+Because D-8/D-21 suppress routine ingester rebuilds, such a break can hide until the
+next clean boot. The permanent guard is Halley's own CI (`.github/workflows/ci.yml`),
+which builds the ingester crate per-commit; a `docker compose build ingester` step in
+CI would catch the *image* form of this specific regression directly (candidate
+follow-up, not added this turn to keep Day 1 asset-scoped).

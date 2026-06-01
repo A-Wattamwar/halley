@@ -123,7 +123,13 @@ services:
   # ---------- Ingester ----------
   ingester:
     build:
-      context: ./ingester
+      # Root context (not ./ingester): the ingester depends on the sibling
+      # `halley-canonical` crate via a path dependency (../halley-canonical,
+      # see ingester/Cargo.toml + D22/D54). A ./ingester context can't see that
+      # sibling, so we root the build here and scope it with the root
+      # .dockerignore (re-includes only ingester/ + halley-canonical/).
+      context: .
+      dockerfile: ingester/Dockerfile
     container_name: halley-ingester
     restart: unless-stopped
     env_file: .env
