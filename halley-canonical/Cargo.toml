@@ -1,0 +1,18 @@
+[package]
+name = "halley-canonical"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "MIT"
+publish = false
+description = "Halley D22 canonical JSON serialization + SHA-256 body hashing (single source of truth)"
+
+[lib]
+name = "halley_canonical"
+path = "src/lib.rs"
+
+[dependencies]
+# Canonical JSON serialization. Numbers preserved as serde_json::Number (D22).
+serde_json = "1"
+# SHA-256 of the canonical bytes.
+sha2 = "0.10"

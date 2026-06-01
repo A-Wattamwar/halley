@@ -193,6 +193,10 @@ Pick the quickstart that matches your stack:
 
 Each quickstart is under 150 lines: prerequisites, install, setup snippet, verification SQL, and a link to a fully working example app under `examples/`.
 
+### Running the whole loop (record → promote → CI → bisect)
+
+Once you have fixtures, [`docs/running-the-loop.md`](docs/running-the-loop.md) explains the dashboard + runner + terminal model: which worker runs what, how to start a host runner for one-click CI/bisect, and the always-available terminal commands.
+
 ---
 
 ## What it looks like

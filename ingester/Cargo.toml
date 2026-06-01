@@ -49,6 +49,11 @@ clickhouse = { version = "0.13.3", features = ["uuid"] }
 sha2 = "0.10"
 hex = "0.4"
 
+# D22 canonical JSON + SHA-256 — single source of truth (Phase 6 Week 11 Day 1).
+# Path dependency, NOT a workspace: ingester/ keeps its own Cargo.lock and its
+# pinned ICU/idna/uuid tree (D21, D29) untouched. See D22, D54.
+halley-canonical = { path = "../halley-canonical" }
+
 # UUIDs: serde-only (we do not generate UUIDs in Week 1). See DECISIONS.md D2.
 uuid = { version = "1", features = ["serde"] }
 

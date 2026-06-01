@@ -189,6 +189,24 @@ services:
   # D-18: BullMQ uses prefix "halley:worker:" — does NOT touch
   # halley:spans / halley:writers / halley:live:* (ingester keys).
   # D-21: Docker rebuild at most once per day it changes.
+  #
+  # RUNNER ROLE-SPLIT (D54, Week 11 Day 3): this Docker worker runs the
+  # CODE-ONLY jobs (invariant.infer + fixture.write) — promote/edit work out of
+  # the box with `docker compose up`, zero host setup. It does NOT run the
+  # repo-touching jobs (ci.run + bisect.run): those need the user's agent repo,
+  # venv, CLI binary, and halley.config.json, which live on the HOST.
+  #
+  # The HOST worker (repo-touching jobs) is launched MANUALLY on the host, not
+  # as a compose service (D54), e.g. from worker/:
+  #   HALLEY_WORKER_ROLE=host \
+  #   HALLEY_CLI_PATH=../cli/target/release/halley \
+  #   HALLEY_SDK_PY_PATH=../sdk-py \
+  #   POSTGRES_URL=postgres://halley:halley@localhost:5433/halley \
+  #   REDIS_URL=redis://localhost:6380/0 \
+  #   CLICKHOUSE_URL=http://localhost:8123 \
+  #   npm run dev
+  # A single host worker covering all four queues (HALLEY_WORKER_ROLE=all) is the
+  # documented v1 alternative. See docs/running-the-loop.md (Day 5).
   worker:
     build:
       context: ./worker
@@ -199,6 +217,8 @@ services:
       # In-network: use compose service names and internal ports.
       POSTGRES_URL: "postgres://${POSTGRES_USER:-halley}:${POSTGRES_PASSWORD:-halley}@postgres:5432/${POSTGRES_DB:-halley}"
       REDIS_URL: "redis://redis:6379/0"
+      # Runner role-split (D54): the Docker worker runs code-only jobs only.
+      HALLEY_WORKER_ROLE: "docker"
       # Fixture writer target repo (Day 4). Mounted below; the code default
       # for host runs is ./examples/replay-target (resolved from cwd).
       HALLEY_FIXTURE_REPO_PATH: "/repo"
