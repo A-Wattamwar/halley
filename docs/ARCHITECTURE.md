@@ -5,6 +5,15 @@ Owner: Ayush Wattamwar
 
 This document describes Halley's system design: what each component does, how data flows through it, the storage model, and why each technical choice was made. It is the engineering truth base of the project. If anything major changes during the build, we update this file first and the code second.
 
+> **Status note (Phase 6, 2026-05-31).** This document is the original v0.2 design (May 13) and has not been fully reconciled with what shipped through Phases 3–6. A few sections describe intent that diverged in the build — known deltas as of Phase 6:
+> - **§3.1 Halley SDK (TypeScript).** The standalone TS SDK was **dropped** in Phase 3 in favor of OTLP-direct instrumentation + quickstarts (ROADMAP v0.5, DECISIONS D41). What shipped for bit-fidelity capture is the **Python record/replay shim** (`sdk-py/`, D51/D53). A TS shim is deferred (not built).
+> - **§3.7 / §5.3 GitHub App fixture writes.** Not built. Fixtures are written to a **local repo path** only; GitHub App push is deferred.
+> - **§3.9 Worker jobs.** The shipped jobs are `invariant.infer`, `fixture.write`, `ci.run`, and `bisect.run` (the runner-role split is DECISIONS **D54**); `fixture.validate` was not built.
+> - **Semantic invariants** are inferred/editable but the **runner is an unshipped stub** (off by default).
+> - **Capture is two-tier** (D53): Tier 1 OTLP = observability + invariant inference (not bit-faithful); Tier 2 shim = bit-fidelity replay. See [`fixture-format.md`](fixture-format.md).
+>
+> The component shapes, data model (§4), and design rationale (§6) remain accurate. For the current loop mechanics see [`running-the-loop.md`](running-the-loop.md); for shipped status see [`ROADMAP.md`](ROADMAP.md) and [`DECISIONS.md`](DECISIONS.md).
+
 > For a worked concrete example of the problem Halley solves and what the loop looks like in practice, read [`SCENARIO.md`](SCENARIO.md) first.
 
 ---

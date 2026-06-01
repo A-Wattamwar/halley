@@ -374,3 +374,11 @@ intercepted OpenAI API request body.
 This limitation is tracked for Phase 6. The correct fix is a higher-level
 interception point (e.g., wrapping the agent's `tool_call` dispatch method)
 or an explicit "dry-run" mode in the tool registry.
+
+---
+
+## See also
+
+- [`running-the-loop.md`](running-the-loop.md) — how `halley ci` and `halley bisect` consume these fixtures (dashboard, runner, and terminal).
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — where fixtures sit in the overall system.
+- [`DECISIONS.md`](DECISIONS.md) — D52/D53 (fixture format + capture tiers) and D22 (canonical hashing).

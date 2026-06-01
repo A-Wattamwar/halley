@@ -1380,10 +1380,9 @@ is identical — the crate is copied, not modified).
 
 **Verification.** `docker compose build ingester` succeeds with the root context, and
 `docker compose up -d` brings all six services up healthy (including the rebuilt
-ingester) — confirmed Week 12 Day 1. The full clean-state chain
-(`docker compose down -v && docker compose up -d && make ready && make smoke`) is the
-recommended pre-launch check to confirm `make smoke` passes against a from-scratch
-ingester image.
+ingester). Proven end-to-end from a clean state (Week 12 Day 1):
+`docker compose down -v && docker compose up -d && make ready && make smoke` — the
+freshly built ingester image comes up healthy and the smoke suite passes 20/20.
 
 **Lesson / guard.** A host-side path-dependency extraction (D22 → `halley-canonical`)
 silently invalidates any Docker image whose context excludes the new sibling crate.

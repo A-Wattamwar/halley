@@ -299,6 +299,8 @@ make load-test
 
 ## Documentation
 
+Browse everything from the [`docs/`](docs/README.md) index. Highlights:
+
 - [`docs/SCENARIO.md`](docs/SCENARIO.md): a concrete real-world story of what Halley does and why it matters. Read this first.
 - [`docs/running-the-loop.md`](docs/running-the-loop.md): the dashboard + runner + terminal model for record → promote → CI → bisect.
 - [`docs/fixture-format.md`](docs/fixture-format.md): the locked on-disk fixture v1 contract and the two capture tiers.

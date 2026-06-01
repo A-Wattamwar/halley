@@ -235,3 +235,11 @@ Your production traffic is the best test suite you will ever have. You just cann
 Halley makes that test suite usable. It records production runs with cassette fidelity, turns any run into a permanent regression test with one click, replays the whole library in CI for pennies or free, and tells you which real customer scenario just broke when you change something.
 
 That is the loop. That is the one hero thing.
+
+---
+
+## Next
+
+- [`ARCHITECTURE.md`](ARCHITECTURE.md) — how the system is built to make this loop work.
+- [`running-the-loop.md`](running-the-loop.md) — run the loop yourself: dashboard, runner, and terminal.
+- [`fixture-format.md`](fixture-format.md) — what a fixture actually is on disk.
