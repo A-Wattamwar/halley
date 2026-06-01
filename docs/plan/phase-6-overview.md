@@ -217,3 +217,23 @@ Per the Phase 5 retro debt inventory, these stay scoped out of Phase 6 unless ex
 ## Decision to record on Day 1
 
 **D54. Dashboard enqueues + displays; a host-side runner (the worker on the host) executes CI and bisect; terminal commands are always shown.** See the "Core decision" section above for full rationale and tradeoff. This closes the dashboard half of the hero loop honestly, without claiming a generic server can run an arbitrary user's agent.
+
+
+---
+
+## Week 11 checkpoint (2026-05-31)
+
+Week 11 closed the dashboard half of the hero loop and made CI real. Summary of Days 1–5:
+
+- **Day 1 — `halley-canonical` crate (P0 hygiene).** Extracted the D22 canonical-JSON + SHA-256 algorithm into a single Rust crate; `ingester/` and `cli/` depend on it via a `path` dependency (no root workspace — `ingester/Cargo.lock`'s pinned ICU/idna/uuid tree untouched; D4/D21/D29 intact). Byte-for-byte parity proven (real hero-demo body + adversarial Unicode). **D54** recorded.
+- **Day 2 — per-fixture execution context.** Additive Postgres migration adding nullable `fixtures.target_repo_path` + `config_path`. Rewired `worker/src/jobs/bisect-run.ts` to read them and pass `--repo`/`--config` to the CLI; removed **every** hardcoded `/Users/...` path (grep-clean). NULL context degrades honestly to `needs_runner` with a copy-paste command (status='failed' + log-prefix, since `bisect_jobs` predates the status).
+- **Day 3 — close the loop in the UI.** New `ci_runs` table (with first-class `needs_runner` status); new `ci.run` host-worker job; shared `worker/src/jobs/runner-common.ts` (DRY across ci/bisect). Runner role-split via `HALLEY_WORKER_ROLE=docker|host|all`; Redis heartbeat (`halley:runner:heartbeat`); dashboard **Run CI** action, runner-status pill, and copy-command UI (D-23). Proven end-to-end: ci.run done (19/19, $0), failed, and needs_runner; role-split and heartbeat connect/disconnect verified.
+- **Day 4 — prove CI is real.** Fixed the pre-existing bullmq/ioredis worker `tsc` errors (ConnectionOptions cast, zero behavior change). Added the permanent **Python↔Rust D22 parity guard** (`sdk-py/tests/test_rust_parity.py`, proven to fail on perturbation). Added Halley's own repo CI (`.github/workflows/ci.yml`: per-crate rust, node, parity jobs). All Day 1–4 work committed to branch `phase-6-week-11`; **push + PR handed to Ayush** (gh/HTTPS creds not available in the exec env) — green-on-PR pending his push.
+- **Day 5 — close the week.** Dashboard CI Playwright E2E (`dashboard/e2e/dashboard-ci.spec.ts`): the honest not-detected/copy-command path **and** the connected-pill/Run-CI path, both deterministic via the heartbeat key; full suite green (no regression to `live-span.spec.ts`). Wrote [`docs/running-the-loop.md`](../running-the-loop.md) (the dashboard+runner+terminal model) and linked it from the README.
+
+**Carried to Week 12 (launch assets):** README hero GIF + dashboard screenshots; docs site; landing page + live read-only demo; 3-minute video; blog post; Show HN + resume bullets.
+
+**Open debt / deferrals (unchanged):**
+- Promote/save path does **not** yet auto-populate `target_repo_path` / `config_path` — fixtures default to NULL → `needs_runner`; manual SQL backfill is the dev path. Wiring it is a candidate Week 12 (or later) follow-up.
+- The `halley-ci.yml` fixture-replay Action's green-on-real-PR validation (Day 4 Piece 4) is pending Ayush's push of `phase-6-week-11`; iterate on whatever the real ubuntu runner surfaces (agent venv, fixture discovery).
+- Deferrals from the plan stay out: TS shim, in-process tool interception, semantic invariant runner, containerized server-side bisect, GitHub App fixture push.
