@@ -1,327 +1,466 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Halley — your production traffic is your test suite</title>
-<meta name="description" content="Halley records your production agent runs as bit-fidelity cassettes, turns any run into a permanent regression test with one click, and replays your whole fixture library in CI at zero LLM cost — then bisects to the exact commit that broke it." />
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Halley — your production traffic is your test suite</title>
+  <meta name="description"
+    content="Halley records your production agent runs as bit-fidelity cassettes, turns any run into a permanent regression test with one click, and replays your whole fixture library in CI at zero LLM cost — then bisects to the exact commit that broke it." />
 
-<!-- Open Graph / social preview -->
-<meta property="og:title" content="Halley — your production traffic is your test suite" />
-<meta property="og:description" content="Record production agent runs as bit-fidelity cassettes, promote any run into a regression test, replay the whole library in CI at $0, and bisect to the commit that broke it." />
-<meta property="og:type" content="website" />
+  <!-- Open Graph / social preview -->
+  <meta property="og:title" content="Halley — your production traffic is your test suite" />
+  <meta property="og:description"
+    content="Record production agent runs as bit-fidelity cassettes, promote any run into a regression test, replay the whole library in CI at $0, and bisect to the commit that broke it." />
+  <meta property="og:type" content="website" />
 
-<style>
-  :root {
-    --bg: #0a0a0f;
-    --panel: #14141c;
-    --panel-2: #1b1b26;
-    --border: #2a2a38;
-    --text: #e6e6ee;
-    --muted: #9aa0b4;
-    --accent: #8b7cf6;      /* halley violet */
-    --green: #4ade80;
-    --red: #f87171;
-    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: var(--sans);
-    line-height: 1.6;
-    -webkit-font-smoothing: antialiased;
-  }
-  a { color: var(--accent); text-decoration: none; }
-  a:hover { text-decoration: underline; }
-  code {
-    font-family: var(--mono);
-    background: var(--panel-2);
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 0.1em 0.4em;
-    font-size: 0.9em;
-  }
-  .wrap { max-width: 960px; margin: 0 auto; padding: 0 20px; }
+  <style>
+    :root {
+      --bg: #0a0a0f;
+      --panel: #14141c;
+      --panel-2: #1b1b26;
+      --border: #2a2a38;
+      --text: #e6e6ee;
+      --muted: #9aa0b4;
+      --accent: #8b7cf6;
+      /* halley violet */
+      --green: #4ade80;
+      --red: #f87171;
+      --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    }
 
-  /* Hero */
-  header { padding: 64px 0 32px; text-align: center; }
-  .tagline {
-    font-size: clamp(1.8rem, 5vw, 3rem);
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    margin: 0 0 18px;
-    background: linear-gradient(120deg, #fff 30%, var(--accent));
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-  }
-  .pitch {
-    font-size: clamp(1.05rem, 2.2vw, 1.25rem);
-    color: var(--text);
-    max-width: 760px;
-    margin: 0 auto 14px;
-  }
-  .subpitch { color: var(--muted); max-width: 640px; margin: 0 auto 28px; }
+    * {
+      box-sizing: border-box;
+    }
 
-  .cta-row {
-    display: flex; gap: 14px; justify-content: center; flex-wrap: wrap;
-    margin-bottom: 14px;
-  }
-  .btn {
-    display: inline-block;
-    padding: 12px 22px;
-    border-radius: 10px;
-    font-weight: 600;
-    font-size: 1rem;
-    border: 1px solid var(--border);
-  }
-  .btn-primary { background: var(--accent); color: #0a0a0f; border-color: var(--accent); }
-  .btn-primary:hover { filter: brightness(1.08); text-decoration: none; }
-  .btn-secondary { background: var(--panel); color: var(--text); }
-  .btn-secondary:hover { background: var(--panel-2); text-decoration: none; }
-  .demo-note {
-    font-size: 0.8rem; color: var(--muted); margin-top: 4px;
-  }
+    html {
+      scroll-behavior: smooth;
+    }
 
-  /* GIF */
-  .demo {
-    margin: 36px auto 8px;
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    overflow: hidden;
-    background: #000;
-    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-  }
-  .demo img { display: block; width: 100%; height: auto; }
-  .demo-cap {
-    text-align: center; color: var(--muted); font-size: 0.9rem;
-    margin: 14px auto 0; max-width: 720px;
-  }
-  .demo-cap code { font-size: 0.85em; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
 
-  /* Sections */
-  section { padding: 48px 0; border-top: 1px solid var(--border); }
-  h2 {
-    font-size: clamp(1.4rem, 3vw, 1.9rem);
-    font-weight: 700;
-    letter-spacing: -0.01em;
-    margin: 0 0 8px;
-  }
-  .section-sub { color: var(--muted); margin: 0 0 28px; }
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
 
-  /* How it works */
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .step {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 22px;
-  }
-  .step .n {
-    font-family: var(--mono);
-    font-size: 0.8rem;
-    color: var(--accent);
-    font-weight: 700;
-    letter-spacing: 0.08em;
-  }
-  .step h3 { margin: 6px 0 8px; font-size: 1.15rem; }
-  .step h3 code { font-size: 0.85em; }
-  .step p { margin: 0; color: var(--muted); font-size: 0.95rem; }
+    a:hover {
+      text-decoration: underline;
+    }
 
-  /* Tiers */
-  .tiers { display: grid; grid-template-columns: repeat(2, 1fr); gap: 18px; }
-  .tier {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 24px;
-  }
-  .tier h3 { margin: 0 0 10px; font-size: 1.15rem; }
-  .tier .tag {
-    display: inline-block; font-family: var(--mono); font-size: 0.72rem;
-    padding: 2px 8px; border-radius: 999px; margin-bottom: 12px;
-    border: 1px solid var(--border); color: var(--muted);
-  }
-  .tier p { margin: 0; color: var(--muted); font-size: 0.95rem; }
-  .tiers-foot { color: var(--muted); font-size: 0.92rem; margin: 20px 0 0; }
+    code {
+      font-family: var(--mono);
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 0.1em 0.4em;
+      font-size: 0.9em;
+    }
 
-  footer {
-    border-top: 1px solid var(--border);
-    padding: 32px 0 56px;
-    text-align: center;
-    color: var(--muted);
-    font-size: 0.9rem;
-  }
-  .status {
-    display: inline-block; font-family: var(--mono); font-size: 0.75rem;
-    color: var(--muted); border: 1px solid var(--border);
-    border-radius: 999px; padding: 3px 10px; margin-bottom: 22px;
-  }
+    .wrap {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 0 20px;
+    }
 
-  @media (max-width: 720px) {
-    .steps, .tiers { grid-template-columns: 1fr; }
-    header { padding: 40px 0 24px; }
-  }
-</style>
+    /* Hero */
+    header {
+      padding: 64px 0 32px;
+      text-align: center;
+    }
+
+    .tagline {
+      font-size: clamp(1.8rem, 5vw, 3rem);
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin: 0 0 18px;
+      background: linear-gradient(120deg, #fff 30%, var(--accent));
+      -webkit-background-clip: text;
+      background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .pitch {
+      font-size: clamp(1.05rem, 2.2vw, 1.25rem);
+      color: var(--text);
+      max-width: 760px;
+      margin: 0 auto 14px;
+    }
+
+    .subpitch {
+      color: var(--muted);
+      max-width: 640px;
+      margin: 0 auto 28px;
+    }
+
+    .cta-row {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-bottom: 14px;
+    }
+
+    .btn {
+      display: inline-block;
+      padding: 12px 22px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 1rem;
+      border: 1px solid var(--border);
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0a0a0f;
+      border-color: var(--accent);
+    }
+
+    .btn-primary:hover {
+      filter: brightness(1.08);
+      text-decoration: none;
+    }
+
+    .btn-secondary {
+      background: var(--panel);
+      color: var(--text);
+    }
+
+    .btn-secondary:hover {
+      background: var(--panel-2);
+      text-decoration: none;
+    }
+
+    .demo-note {
+      font-size: 0.8rem;
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    /* GIF */
+    .demo {
+      margin: 36px auto 8px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #000;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    }
+
+    .demo img {
+      display: block;
+      width: 100%;
+      height: auto;
+    }
+
+    .demo-cap {
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+      margin: 14px auto 0;
+      max-width: 720px;
+    }
+
+    .demo-cap code {
+      font-size: 0.85em;
+    }
+
+    /* Sections */
+    section {
+      padding: 48px 0;
+      border-top: 1px solid var(--border);
+    }
+
+    h2 {
+      font-size: clamp(1.4rem, 3vw, 1.9rem);
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      margin: 0 0 8px;
+    }
+
+    .section-sub {
+      color: var(--muted);
+      margin: 0 0 28px;
+    }
+
+    /* How it works */
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 18px;
+    }
+
+    .step {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 22px;
+    }
+
+    .step .n {
+      font-family: var(--mono);
+      font-size: 0.8rem;
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+    }
+
+    .step h3 {
+      margin: 6px 0 8px;
+      font-size: 1.15rem;
+    }
+
+    .step h3 code {
+      font-size: 0.85em;
+    }
+
+    .step p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    /* Tiers */
+    .tiers {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 18px;
+    }
+
+    .tier {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    .tier h3 {
+      margin: 0 0 10px;
+      font-size: 1.15rem;
+    }
+
+    .tier .tag {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 999px;
+      margin-bottom: 12px;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+
+    .tier p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .tiers-foot {
+      color: var(--muted);
+      font-size: 0.92rem;
+      margin: 20px 0 0;
+    }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0 56px;
+      text-align: center;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .status {
+      display: inline-block;
+      font-family: var(--mono);
+      font-size: 0.75rem;
+      color: var(--muted);
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 10px;
+      margin-bottom: 22px;
+    }
+
+    @media (max-width: 720px) {
+
+      .steps,
+      .tiers {
+        grid-template-columns: 1fr;
+      }
+
+      header {
+        padding: 40px 0 24px;
+      }
+    }
+  </style>
 </head>
+
 <body>
 
-<div class="wrap">
-  <header>
-    <div class="status">Pre-alpha · active development through August 2026</div>
-    <!-- Tagline + pitch: verbatim from README.md -->
-    <h1 class="tagline">Your production traffic is your test suite.</h1>
-    <p class="pitch">
-      Halley records your production agent runs as bit-fidelity cassettes, turns any
-      run into a permanent regression test with one click, and replays your whole
-      fixture library in CI at <strong>zero LLM cost</strong> — then bisects to the
-      exact commit that broke it.
-    </p>
-    <p class="subpitch">
-      Self-hosted. OpenTelemetry-native. Built for the era where your model keeps
-      changing under you.
-    </p>
-
-    <div class="cta-row">
-      <!-- TODO[AYUSH/Day 5]: replace DEMO_URL with the live read-only dashboard URL once deployed -->
-      <a class="btn btn-primary" href="DEMO_URL">Try the live demo</a>
-      <a class="btn btn-secondary" href="https://github.com/A-Wattamwar/halley">View on GitHub</a>
-    </div>
-    <p class="demo-note">
-      <!-- TODO[AYUSH/Day 5]: the demo is read-only and goes live when the repo is made public -->
-      Live demo link goes live at launch (read-only dashboard with real example-app traces).
-    </p>
-
-    <!-- Hero GIF: docs/demo/hero-ci-bisect.gif (1280×800). Path is repo-relative;
-         see landing-deploy-runbook.md for the hosting note on this path. -->
-    <div class="demo">
-      <img src="../docs/demo/hero-ci-bisect.gif"
-           width="1280" height="800"
-           alt="Halley hero demo: halley ci passes on the last-good commit, a prompt regression turns it red, and halley bisect binary-searches the commits to name the one that broke the fixture — all in pure replay mode at $0, no live API calls" />
-    </div>
-    <p class="demo-cap">
-      <code>halley ci</code> (green) → prompt regression → <code>halley ci</code> (red)
-      → <code>halley bisect</code> names the commit. ~15&nbsp;s, $0, zero live calls.
-    </p>
-  </header>
-</div>
-
-<div class="wrap">
-  <section id="how">
-    <h2>How it works</h2>
-    <p class="section-sub">Record → CI → bisect. The loop that turns a production run into a regression test your CI catches next time.</p>
-    <div class="steps">
-      <div class="step">
-        <div class="n">01 · RECORD</div>
-        <h3>Capture real runs</h3>
-        <p>
-          Every production agent run becomes a cassette — the exact sequence of LLM
-          and tool calls. With the recorder shim, that capture is bit-fidelity: the
-          raw request and response bodies, not a reconstruction.
-        </p>
-      </div>
-      <div class="step">
-        <div class="n">02 · CI</div>
-        <h3>Replay with <code>halley ci</code></h3>
-        <p>
-          Promote any run into a fixture in your repo, then replay your whole fixture
-          library against the current code. When cassettes match, it's deterministic
-          and costs $0 — no live LLM calls.
-        </p>
-      </div>
-      <div class="step">
-        <div class="n">03 · BISECT</div>
-        <h3>Name the bad commit</h3>
-        <p>
-          When a fixture fails, <code>halley bisect</code> binary-searches your recent
-          commits and points at the exact change — prompt edit, model bump, framework
-          upgrade — that broke the invariant.
-        </p>
-      </div>
-    </div>
-  </section>
-
-  <section id="arch">
-    <h2>Architecture</h2>
-    <p class="section-sub">Your app emits OTLP spans. Halley captures, stores, and replays them.</p>
-    <div class="demo" style="box-shadow:none; background:var(--panel-2); padding:12px; border-radius:12px; text-align:center;">
-      <img src="../docs/diagrams/architecture.png"
-           alt="Halley architecture: OTLP spans flow from your AI app into the Rust ingester, through Redis Streams to the writer, into ClickHouse and Postgres, up to the Next.js dashboard, which promotes runs to fixtures in your repo for halley ci replay and bisect"
-           style="max-width:480px; width:100%; height:auto; border-radius:8px;" />
-    </div>
-  </section>
-
-  <section id="tiers">
-    <h2>Two tiers of capture</h2>
-    <p class="section-sub">Halley is honest about what it captures, because it changes what you get.</p>
-    <div class="tiers">
-      <div class="tier">
-        <span class="tag">TIER 1 · zero Halley code</span>
-        <h3>Observability</h3>
-        <p>
-          Point any OTLP-emitting instrumentation (OpenLLMetry, OpenInference, OTEL
-          GenAI semconv, Vercel AI SDK) at the ingester. You get the full dashboard —
-          runs, spans, timing, token counts, cost — plus automatic invariant
-          inference. Bodies are reconstructed from <code>gen_ai.*</code> span events,
-          so they're great for observability and inferring invariants, but they are
-          <strong>not</strong> byte-faithful and cannot drive bit-exact replay on
-          their own.
-        </p>
-      </div>
-      <div class="tier">
-        <span class="tag">TIER 2 · one-line client wrap</span>
-        <h3>Bit-fidelity replay</h3>
-        <p>
-          Add the Halley recorder shim and Halley captures the full raw
-          request/response JSON. Now <code>hash(live request) == recorded match_key</code>
-          by construction, so <code>halley ci</code> replays the exact recorded
-          responses at <strong>$0</strong> and <code>halley bisect</code> can
-          binary-search commits deterministically. This is the hero loop in the demo
-          above.
-        </p>
-      </div>
-    </div>
-    <p class="tiers-foot">
-      Both tiers write the <strong>same</strong> fixture format. Tier 1 gives you
-      observability and invariant inference at zero instrumentation cost; Tier 2 adds
-      the deterministic $0 CI replay.
-    </p>
-  </section>
-
-  <section id="start">
-    <h2>Get started</h2>
-    <p class="section-sub">Self-host the whole stack with one command.</p>
-    <div class="demo" style="box-shadow:none;">
-      <div style="padding:18px 20px; font-family:var(--mono); font-size:0.9rem; color:var(--text); background:var(--panel-2); overflow-x:auto;">
-        <div><span style="color:var(--muted);">$</span> git clone https://github.com/A-Wattamwar/halley</div>
-        <div><span style="color:var(--muted);">$</span> cd halley</div>
-        <div><span style="color:var(--muted);">$</span> docker compose up</div>
-        <div style="color:var(--muted);"># dashboard → http://localhost:3000</div>
-      </div>
-    </div>
-    <p class="tiers-foot">
-      Full docs, quickstarts, and the dashboard-plus-runner model are in the
-      <a href="https://github.com/A-Wattamwar/halley">GitHub repo</a>.
-    </p>
-  </section>
-</div>
-
-<footer>
   <div class="wrap">
-    <p>
-      Built by <a href="https://ayushwattamwar.com">Ayush Wattamwar</a> ·
-      <a href="https://github.com/A-Wattamwar/halley">GitHub</a> · MIT licensed
-    </p>
-    <p style="opacity:0.7;">
-      Named after Edmond Halley, who turned a noisy archive of past observations into a
-      reliable prediction of the future.
-    </p>
+    <header>
+      <div class="status">Pre-alpha · active development through August 2026</div>
+      <!-- Tagline + pitch: verbatim from README.md -->
+      <h1 class="tagline">Your production traffic is your test suite.</h1>
+      <p class="pitch">
+        Halley records your production agent runs as bit-fidelity cassettes, turns any
+        run into a permanent regression test with one click, and replays your whole
+        fixture library in CI at <strong>zero LLM cost</strong> — then bisects to the
+        exact commit that broke it.
+      </p>
+      <p class="subpitch">
+        Self-hosted. OpenTelemetry-native. Built for the era where your model keeps
+        changing under you.
+      </p>
+
+      <div class="cta-row">
+        <!-- TODO[AYUSH/Day 5]: replace DEMO_URL with the live read-only dashboard URL once deployed -->
+        <a class="btn btn-primary" href="DEMO_URL">Try the live demo</a>
+        <a class="btn btn-secondary" href="https://github.com/A-Wattamwar/halley">View on GitHub</a>
+      </div>
+      <p class="demo-note">
+        <!-- TODO[AYUSH/Day 5]: the demo is read-only and goes live when the repo is made public -->
+        Live demo link goes live at launch (read-only dashboard with real example-app traces).
+      </p>
+
+      <!-- Hero GIF: docs/demo/hero-ci-bisect.gif (1280×800). Path is repo-relative;
+         see landing-deploy-runbook.md for the hosting note on this path. -->
+      <div class="demo">
+        <img src="../docs/demo/hero-ci-bisect.gif" width="1280" height="800"
+          alt="Halley hero demo: halley ci passes on the last-good commit, a prompt regression turns it red, and halley bisect binary-searches the commits to name the one that broke the fixture — all in pure replay mode at $0, no live API calls" />
+      </div>
+      <p class="demo-cap">
+        <code>halley ci</code> (green) → prompt regression → <code>halley ci</code> (red)
+        → <code>halley bisect</code> names the commit. ~15&nbsp;s, $0, zero live calls.
+      </p>
+    </header>
   </div>
-</footer>
+
+  <div class="wrap">
+    <section id="how">
+      <h2>How it works</h2>
+      <p class="section-sub">Record → CI → bisect. The loop that turns a production run into a regression test your CI
+        catches next time.</p>
+      <div class="steps">
+        <div class="step">
+          <div class="n">01 · RECORD</div>
+          <h3>Capture real runs</h3>
+          <p>
+            Every production agent run becomes a cassette — the exact sequence of LLM
+            and tool calls. With the recorder shim, that capture is bit-fidelity: the
+            raw request and response bodies, not a reconstruction.
+          </p>
+        </div>
+        <div class="step">
+          <div class="n">02 · CI</div>
+          <h3>Replay with <code>halley ci</code></h3>
+          <p>
+            Promote any run into a fixture in your repo, then replay your whole fixture
+            library against the current code. When cassettes match, it's deterministic
+            and costs $0 — no live LLM calls.
+          </p>
+        </div>
+        <div class="step">
+          <div class="n">03 · BISECT</div>
+          <h3>Name the bad commit</h3>
+          <p>
+            When a fixture fails, <code>halley bisect</code> binary-searches your recent
+            commits and points at the exact change — prompt edit, model bump, framework
+            upgrade — that broke the invariant.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section id="arch">
+      <h2>Architecture</h2>
+      <p class="section-sub">Your app emits OTLP spans. Halley captures, stores, and replays them.</p>
+      <div class="demo"
+        style="box-shadow:none; background:var(--panel-2); padding:12px; border-radius:12px; text-align:center;">
+        <img src="../docs/diagrams/architecture.png"
+          alt="Halley architecture: OTLP spans flow from your AI app into the Rust ingester, through Redis Streams to the writer, into ClickHouse and Postgres, up to the Next.js dashboard, which promotes runs to fixtures in your repo for halley ci replay and bisect"
+          style="max-width:480px; width:100%; height:auto; border-radius:8px;" />
+      </div>
+    </section>
+
+    <section id="tiers">
+      <h2>Two tiers of capture</h2>
+      <p class="section-sub">Halley is honest about what it captures, because it changes what you get.</p>
+      <div class="tiers">
+        <div class="tier">
+          <span class="tag">TIER 1 · zero Halley code</span>
+          <h3>Observability</h3>
+          <p>
+            Point any OTLP-emitting instrumentation (OpenLLMetry, OpenInference, OTEL
+            GenAI semconv, Vercel AI SDK) at the ingester. You get the full dashboard —
+            runs, spans, timing, token counts, cost — plus automatic invariant
+            inference. Bodies are reconstructed from <code>gen_ai.*</code> span events,
+            so they're great for observability and inferring invariants, but they are
+            <strong>not</strong> byte-faithful and cannot drive bit-exact replay on
+            their own.
+          </p>
+        </div>
+        <div class="tier">
+          <span class="tag">TIER 2 · one-line client wrap</span>
+          <h3>Bit-fidelity replay</h3>
+          <p>
+            Add the Halley recorder shim and Halley captures the full raw
+            request/response JSON. Now <code>hash(live request) == recorded match_key</code>
+            by construction, so <code>halley ci</code> replays the exact recorded
+            responses at <strong>$0</strong> and <code>halley bisect</code> can
+            binary-search commits deterministically. This is the hero loop in the demo
+            above.
+          </p>
+        </div>
+      </div>
+      <p class="tiers-foot">
+        Both tiers write the <strong>same</strong> fixture format. Tier 1 gives you
+        observability and invariant inference at zero instrumentation cost; Tier 2 adds
+        the deterministic $0 CI replay.
+      </p>
+    </section>
+
+    <section id="start">
+      <h2>Get started</h2>
+      <p class="section-sub">Self-host the whole stack with one command.</p>
+      <div class="demo" style="box-shadow:none;">
+        <div
+          style="padding:18px 20px; font-family:var(--mono); font-size:0.9rem; color:var(--text); background:var(--panel-2); overflow-x:auto;">
+          <div><span style="color:var(--muted);">$</span> git clone https://github.com/A-Wattamwar/halley</div>
+          <div><span style="color:var(--muted);">$</span> cd halley</div>
+          <div><span style="color:var(--muted);">$</span> docker compose up</div>
+          <div style="color:var(--muted);"># dashboard → http://localhost:3000</div>
+        </div>
+      </div>
+      <p class="tiers-foot">
+        Full docs, quickstarts, and the dashboard-plus-runner model are in the
+        <a href="https://github.com/A-Wattamwar/halley">GitHub repo</a>.
+      </p>
+    </section>
+  </div>
+
+  <footer>
+    <div class="wrap">
+      <p>
+        Built by <a href="https://ayushwattamwar.com">Ayush Wattamwar</a> and <a
+          href="https://hridayadande.com/">Hridaya Dande</a> ·
+        <a href="https://github.com/A-Wattamwar/halley">GitHub</a> · MIT licensed
+      </p>
+      <p style="opacity:0.7;">
+        Named after Edmond Halley, who turned a noisy archive of past observations into a
+        reliable prediction of the future.
+      </p>
+    </div>
+  </footer>
 
 </body>
+
 </html>

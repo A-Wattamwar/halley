@@ -141,14 +141,14 @@ flowchart TD
         normalizer["Normalizer<br/>halley-raw · openllmetry · openinference · vercel-ai · otel-genai"]
     end
 
-    ingester -->|CanonicalSpan| redis["Redis Streams<br/>(halley:spans)"]
-    redis --> writer["Writer Task<br/>(same binary)"]
+    ingester -->|CanonicalSpan| redis["Redis Streams<br/>halley:spans"]
+    redis --> writer["Writer Task<br/>same binary"]
     writer --> clickhouse[("ClickHouse<br/>observations · bodies · pricing")]
     writer --> postgres[("Postgres<br/>auth · projects · API keys · jobs")]
     clickhouse --> dashboard["Next.js Dashboard"]
     postgres --> dashboard
     dashboard -->|promote| fixtures["halley/fixtures/<br/>in your repo"]
-    fixtures --> ci["halley ci<br/>(replay + bisect)"]
+    fixtures --> ci["halley ci<br/>replay + bisect"]
 ```
 
 Full system design in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
