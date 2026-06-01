@@ -65,3 +65,11 @@ playwright-report/
 # ---------- Logs ----------
 logs/
 *.log
+
+# ---------- Internal planning docs (not for public consumption) ----------
+# Phase/week build plans, retros, and internal prompts. These are our
+# working planning artifacts, not user-facing documentation. Already-tracked
+# copies were untracked via `git rm --cached` (kept on disk, removed from repo).
+docs/plan/
+docs/PARTNER_PROMPT.md
+docs/REVIEWER_PROMPT.md
