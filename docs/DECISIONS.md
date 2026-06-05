@@ -1391,3 +1391,63 @@ next clean boot. The permanent guard is Halley's own CI (`.github/workflows/ci.y
 which builds the ingester crate per-commit; a `docker compose build ingester` step in
 CI would catch the *image* form of this specific regression directly (candidate
 follow-up, not added this turn to keep Day 1 asset-scoped).
+
+---
+
+## 2026-06-05 — Phase 6 Week 12 Day 4.5 (pre-launch clean-room fixes)
+
+### D56. Clean-room install fixes: README copies `.env` before `up`, and the ingester Dockerfile drops the gitignored `halley-canonical/Cargo.lock` from its COPY.
+
+**Context.** A full end-to-end test on a fresh machine (clone → `docker compose up`
+→ record → CI green → regression → CI red → bisect, all $0 pure replay) surfaced two
+defects that break the `git clone` → `docker compose up` path for anyone cloning the
+public repo. Neither showed up in prior local runs because the local working tree
+already had the artifacts both defects depend on. Both are build/install-infrastructure
+fixes; **no locked contract changes** (canonical schema, D22 hashing, fixture format v1,
+D54 runner arch all untouched).
+
+**Blocker A — `.env` is required but never ships.** `docker-compose.yml` sets
+`env_file: .env` on the ingester, dashboard, and worker services. Only `.env.example`
+is tracked; `.env` is gitignored (Env/Secrets section). In Compose v2 a missing
+`env_file` is a hard error, so a fresh clone's `docker compose up` fails immediately —
+contradicting the README's "one command" install. The README install block listed
+`git clone → cd → docker compose up` with no copy step.
+
+- **Fix.** README "Install" block now runs `cp .env.example .env` before
+  `docker compose up`. The heading `## Install (one command)` is renamed to `## Install`
+  (it is no longer literally one command; honesty discipline). `.env.example` ships
+  dev-only defaults (D-15 sets `HALLEY_AUTH_REQUIRED=false`), so the copy is the only
+  manual step and the stack runs with no further setup.
+
+**Blocker B — Dockerfile COPYs an untracked lockfile.** `ingester/Dockerfile` did
+`COPY halley-canonical/Cargo.toml halley-canonical/Cargo.lock ./halley-canonical/`.
+But `halley-canonical/` is a **library** crate whose `Cargo.lock` is gitignored (D4 —
+only `ingester/Cargo.lock` is committed, via the `!ingester/Cargo.lock` negation). A
+clean clone therefore has no `halley-canonical/Cargo.lock`, and the no-cache image build
+fails at that COPY. The local test machine only got past it because a prior host-side
+`cargo build` had generated the lockfile on disk.
+
+- **Fix.** Change the COPY to `COPY halley-canonical/Cargo.toml ./halley-canonical/`
+  (drop the lockfile). The build runs from `/build/ingester` and is driven entirely by
+  the committed `ingester/Cargo.lock`, which already resolves `halley-canonical` (the
+  crate appears as a `path`-source package in that lockfile). The canonical lockfile is
+  thus both **absent** from a clean clone and **unused** by the build — copying it was
+  dead weight that only ever "worked" on a machine that had built host-side first. The
+  adjacent Dockerfile comment now records that `ingester/Cargo.lock` is authoritative.
+  No `.dockerignore` change needed: `!halley-canonical` already re-includes the crate's
+  `Cargo.toml` + `src`, both tracked.
+
+**Verification.** Must be a *true* clean room, because the working tree carries
+`halley-canonical/Cargo.lock` from prior host builds and would mask Blocker B. Procedure:
+clone the tracked-files set into a fresh temp dir (no `target/`, no generated lockfile),
+`cp .env.example .env`, then `docker compose build --no-cache ingester` (the Blocker B
+test), `docker compose up -d && make ready` (all services healthy), and `make smoke`
+(expect 20/20). Tear down and remove the temp dir afterward.
+
+**Lesson / guard.** Two classes of "works on my machine" hid here: (1) a gitignored
+generated file (`.env`, `halley-canonical/Cargo.lock`) that the local tree happens to
+have but a fresh clone does not; (2) an install path documented as shorter than it
+actually is. The durable guard is the clean-room build itself — building from only
+`git ls-files` output (or a fresh clone) with `--no-cache`. A `docker compose build
+--no-cache ingester` step in CI from a clean checkout would catch the image form of
+Blocker B directly (same candidate follow-up noted in D55).

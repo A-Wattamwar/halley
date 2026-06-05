@@ -28,7 +28,13 @@ WORKDIR /build
 # Copy the sibling crate the ingester depends on. Its layout under /build must
 # mirror the host (sibling of ingester/) so the `../halley-canonical` path
 # dependency resolves unchanged.
-COPY halley-canonical/Cargo.toml halley-canonical/Cargo.lock ./halley-canonical/
+#
+# We copy only Cargo.toml (not Cargo.lock): halley-canonical is a library crate
+# whose lockfile is gitignored (D4) and absent from a clean clone. The build is
+# driven entirely by the committed ingester/Cargo.lock, which already resolves
+# halley-canonical, so copying the canonical lockfile is both impossible from a
+# fresh clone and unnecessary. See DECISIONS.md D56.
+COPY halley-canonical/Cargo.toml ./halley-canonical/
 COPY halley-canonical/src ./halley-canonical/src
 
 # Cache dependency compilation separately from source compilation.

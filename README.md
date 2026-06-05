@@ -2,9 +2,9 @@
 
 **Your production traffic is your test suite.**
 
-Halley records your production agent runs as bit-fidelity cassettes, turns any run into a permanent regression test with one click, and replays your whole fixture library in CI at **zero LLM cost** — then bisects to the exact commit that broke it.
+Halley records your production agent runs as bit-fidelity cassettes, turns any run into a permanent regression test with one click, and replays your whole fixture library in CI at **zero LLM cost**, then bisects to the exact commit that broke it.
 
-![Halley hero demo: halley ci passes on the last-good commit, a prompt regression turns it red, and halley bisect binary-searches the commits to name the one that broke the fixture — all in pure replay mode at $0, no live API calls](docs/demo/hero-ci-bisect.gif)
+![Halley hero demo: halley ci passes on the last-good commit, a prompt regression turns it red, and halley bisect binary-searches the commits to name the one that broke the fixture, all in pure replay mode at $0, no live API calls](docs/demo/hero-ci-bisect.gif)
 
 > `halley ci` (green) → prompt regression → `halley ci` (red) → `halley bisect` names the commit. ~15 s, $0, zero live calls.
 
@@ -16,26 +16,27 @@ Self-hosted. OpenTelemetry-native. Built for the era where your model keeps chan
 
 Halley is honest about what it captures, because it changes what you get.
 
-- **Tier 1 — observability, zero Halley code.** Point any OTLP-emitting instrumentation (OpenLLMetry, OpenInference, OTEL GenAI semconv, Vercel AI SDK) at the ingester. You get the full dashboard — runs, spans, timing, token counts, cost — plus automatic invariant inference. Bodies are reconstructed from `gen_ai.*` span events, so they're great for observability and inferring invariants, but they are **not** byte-faithful and cannot drive bit-exact replay on their own.
+- **Tier 1: observability, zero Halley code.** Point any OTLP-emitting instrumentation (OpenLLMetry, OpenInference, OTEL GenAI semconv, Vercel AI SDK) at the ingester. You get the full dashboard (runs, spans, timing, token counts, cost) plus automatic invariant inference. Bodies are reconstructed from `gen_ai.*` span events, so they're great for observability and inferring invariants, but they are **not** byte-faithful and cannot drive bit-exact replay on their own.
 
-- **Tier 2 — bit-fidelity replay, one-line client wrap.** Add the Halley recorder shim and Halley captures the **full raw request/response JSON**. Now `hash(live request) == recorded match_key` by construction, so `halley ci` replays the exact recorded responses at **$0** and `halley bisect` can binary-search commits deterministically. This is the hero loop in the GIF above.
+- **Tier 2: bit-fidelity replay, one-line client wrap.** Add the Halley recorder shim and Halley captures the **full raw request/response JSON**. Now `hash(live request) == recorded match_key` by construction, so `halley ci` replays the exact recorded responses at **$0** and `halley bisect` can binary-search commits deterministically. This is the hero loop in the GIF above.
 
 Both tiers write the **same** fixture format. Tier 1 gives you observability and invariant inference at zero instrumentation cost; Tier 2 adds the deterministic $0 CI replay. Details: [`docs/fixture-format.md`](docs/fixture-format.md) (capture tiers, D53).
 
 ---
 
-## Install (one command)
+## Install
 
 ```bash
 git clone https://github.com/A-Wattamwar/halley
 cd halley
+cp .env.example .env
 docker compose up
 # dashboard   → http://localhost:3000
 # OTLP/HTTP   → http://localhost:4318
 # OTLP/gRPC   → http://localhost:4317
 ```
 
-`docker compose up` brings up the ingester, dashboard, databases, and the code-only worker (promote a run → fixture, edit invariants) with zero extra setup. Point any OTLP-instrumented app at the ingester and real traces start flowing.
+`docker compose up` brings up the ingester, dashboard, databases, and the code-only worker (promote a run → fixture, edit invariants). The `.env` carries dev-only defaults; copy it once and the stack runs with no further setup. Point any OTLP-instrumented app at the ingester and real traces start flowing.
 
 ---
 
@@ -43,11 +44,11 @@ docker compose up
 
 The dashboard drives the whole loop: promote a run, edit invariants, **Run CI**, **Run bisect**.
 
-The two actions that re-run *your* code — `halley ci` and `halley bisect` — execute on a lightweight **runner on your machine** (the worker, run on the host), not in a generic server container. Replaying your agent needs your repo, your venv, and your keys — the same reason `git bisect`, GitHub self-hosted runners, and Buildkite agents all execute where the code lives. The dashboard enqueues and displays; the runner executes and streams results back.
+The two actions that re-run *your* code, `halley ci` and `halley bisect`, execute on a lightweight **runner on your machine** (the worker, run on the host), not in a generic server container. Replaying your agent needs your repo, your venv, and your keys, the same reason `git bisect`, GitHub self-hosted runners, and Buildkite agents all execute where the code lives. The dashboard enqueues and displays; the runner executes and streams results back.
 
-Prefer the terminal? Every dashboard action shows the exact `halley` command to copy — the runner is never a hidden requirement. When no runner is connected, the buttons switch to **Copy command** and jobs resolve to an honest `needs_runner` state, never a fake spinner.
+Prefer the terminal? Every dashboard action shows the exact `halley` command to copy, so the runner is never a hidden requirement. When no runner is connected, the buttons switch to **Copy command** and jobs resolve to an honest `needs_runner` state, never a fake spinner.
 
-Full model — which worker runs what, host vs. in-network ports, starting a host runner: [`docs/running-the-loop.md`](docs/running-the-loop.md).
+Full model, including which worker runs what, host vs. in-network ports, and starting a host runner: [`docs/running-the-loop.md`](docs/running-the-loop.md).
 
 ---
 
@@ -87,7 +88,7 @@ One click on any run in the dashboard turns it into a permanent fixture in your 
 - **Structural**: which tools got called, in what order, how many times.
 - **Schema**: the shape of each LLM output and tool payload.
 - **Metric**: latency and cost bounds.
-- **Semantic** *(planned, not yet shipped)*: optional LLM-as-judge for "is the new output equivalent to the recorded one." The runner is a stub and ships off by default — see the deferrals in [`docs/ROADMAP.md`](docs/ROADMAP.md).
+- **Semantic** *(planned, not yet shipped)*: optional LLM-as-judge for "is the new output equivalent to the recorded one." The runner is a stub and ships off by default. See the deferrals in [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 You edit, tighten, or remove any inferred invariant before it lands in the repo.
 
@@ -95,7 +96,7 @@ You edit, tighten, or remove any inferred invariant before it lands in the repo.
 `halley ci` replays your entire fixture library against the current code. Zero live LLM calls when the cassette matches. When a prompt changes, Halley runs in hybrid mode: tool responses stay cached, only the drifted LLM call goes live. A full failing run shows exactly which invariant broke on which fixture.
 
 ### Bisect
-When a regression fires, `halley bisect` binary-searches recent commits and points at the change that broke the invariant — prompt diff, model version bump, framework upgrade, new tool version. The error message names the commit.
+When a regression fires, `halley bisect` binary-searches recent commits and points at the change that broke the invariant: prompt diff, model version bump, framework upgrade, new tool version. The error message names the commit.
 
 ### Audit
 Every fixture is a reproducible record of what the agent did and why. For regulated industries that need to reproduce an agent decision on demand, the cassette is the audit trail.
@@ -171,7 +172,7 @@ Once you have fixtures, [`docs/running-the-loop.md`](docs/running-the-loop.md) w
 
 ## Supported instrumentation
 
-Halley normalizes spans from five dialects into a single canonical schema. No code changes required — point your existing OTLP exporter at the ingester.
+Halley normalizes spans from five dialects into a single canonical schema. No code changes required. Point your existing OTLP exporter at the ingester.
 
 | Dialect | Detection | Status | Adapter |
 |---|---|---|---|
@@ -207,31 +208,31 @@ Detection runs in priority order: halley-raw → OpenLLMetry → OpenInference �
 
 ## What it looks like
 
-**The hero loop in the dashboard** — promote a run, edit invariants, then run CI and bisect against the real repo, with a runner-status pill and copy-paste terminal commands for every action.
+**The hero loop in the dashboard.** Promote a run, edit invariants, then run CI and bisect against the real repo, with a runner-status pill and copy-paste terminal commands for every action.
 
 ![Fixture edit page header showing the green "Runner: connected" pill next to the fixture title](docs/screenshots/run-ci-connected.png)
-*Runner: connected — a host runner is live, so Run CI and Run bisect execute and stream results in the dashboard.*
+*Runner: connected. A host runner is live, so Run CI and Run bisect execute and stream results in the dashboard.*
 
 ![Run CI result showing 19 of 19 invariants passed for a pure-mode fixture replay](docs/screenshots/run-ci-result.png)
-*A Run CI result — 19/19 invariants passed, $0 pure-mode replay.*
+*A Run CI result: 19/19 invariants passed, $0 pure-mode replay.*
 
 ![Bisect result naming the offending commit that broke the fixture](docs/screenshots/bisect-result.png)
-*A bisect result — the offending commit, named.*
+*A bisect result: the offending commit, named.*
 
-![Runner not detected — the action shows the exact halley command to copy and run in a terminal](docs/screenshots/runner-not-detected.png)
-*Runner: not detected — the exact `halley` command to copy (D-23). Never a fake spinner.*
+![Runner not detected: the action shows the exact halley command to copy and run in a terminal](docs/screenshots/runner-not-detected.png)
+*Runner: not detected. The exact `halley` command to copy (D-23). Never a fake spinner.*
 
-**Runs list** — every agent run in one view with dialect, token counts, cost, and status at a glance.
+**Runs list.** Every agent run in one view with dialect, token counts, cost, and status at a glance.
 
-![Halley runs list — five gpt-4o-mini runs ingested via the otel-genai dialect, each showing spans, token counts, cost, and an ok status](docs/screenshots/runs-list.png)
+![Halley runs list: five gpt-4o-mini runs ingested via the otel-genai dialect, each showing spans, token counts, cost, and an ok status](docs/screenshots/runs-list.png)
 
-**Run detail with span inspector** — click any span bar to open the inspector, showing timing, identity fields (click to copy), model, usage, and the full input/output bodies as pretty-printed JSON.
+**Run detail with span inspector.** Click any span bar to open the inspector, showing timing, identity fields (click to copy), model, usage, and the full input/output bodies as pretty-printed JSON.
 
 ![Halley run detail page with the span inspector open on a gpt-4o-mini chat span, showing identity, model, usage, and the input/output bodies](docs/screenshots/run-detail-inspector.png)
 
 The graph view (Timeline | Graph tab) shows the same spans as a dagre-laid-out ReactFlow graph, with parent→child edges and the same operation-color palette.
 
-**API keys** — create, rotate, and revoke project-scoped ingest keys. Keys are prefixed `hlly_`, stored only as SHA-256 hashes, and shown in full exactly once at creation.
+**API keys.** Create, rotate, and revoke project-scoped ingest keys. Keys are prefixed `hlly_`, stored only as SHA-256 hashes, and shown in full exactly once at creation.
 
 ![Halley API keys settings page showing the create-key form, an empty key list, and the ingester usage example](docs/screenshots/api-keys.png)
 
@@ -254,7 +255,7 @@ Single-node HTTP ingest load test (Phase 2, Week 4).
 
 **Hardware:** Apple M2, 8 GB RAM, Docker Desktop (all services co-located).
 
-**Bottleneck:** The ingester receiver is not the bottleneck — the 5-second sanity check achieved ~9K RPS with 5 VUs. At 5K RPS sustained, the ClickHouse writer becomes the constraint: batch inserts at 100ms intervals with a single writer task limit throughput to ~4.8K spans/sec. The Redis stream absorbed the burst (peak lag ~1.48M entries) and the writer drained all entries with 0 data loss after the test ended. p99 latency exceeded the 50ms target because the Redis `XADD` call occasionally queues behind the writer's batch flush.
+**Bottleneck:** The ingester receiver is not the bottleneck. The 5-second sanity check achieved ~9K RPS with 5 VUs. At 5K RPS sustained, the ClickHouse writer becomes the constraint: batch inserts at 100ms intervals with a single writer task limit throughput to ~4.8K spans/sec. The Redis stream absorbed the burst (peak lag ~1.48M entries) and the writer drained all entries with 0 data loss after the test ended. p99 latency exceeded the 50ms target because the Redis `XADD` call occasionally queues behind the writer's batch flush.
 
 **Reproduce:**
 ```bash
