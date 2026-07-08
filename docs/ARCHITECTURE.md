@@ -5,6 +5,8 @@ Owner: Ayush Wattamwar
 
 This document describes Halley's system design: what each component does, how data flows through it, the storage model, and why each technical choice was made. It is the engineering truth base of the project. If anything major changes during the build, we update this file first and the code second.
 
+The full rationale for every non-obvious choice lives in the append-only [`DECISIONS.md`](DECISIONS.md) log (referenced throughout as D1, D22, D54, and so on).
+
 > **Status note (Phase 6, 2026-05-31).** This document is the original v0.2 design (May 13) and has not been fully reconciled with what shipped through Phases 3–6. A few sections describe intent that diverged in the build — known deltas as of Phase 6:
 > - **§3.1 Halley SDK (TypeScript).** The standalone TS SDK was **dropped** in Phase 3 in favor of OTLP-direct instrumentation + quickstarts (ROADMAP v0.5, DECISIONS D41). What shipped for bit-fidelity capture is the **Python record/replay shim** (`sdk-py/`, D51/D53). A TS shim is deferred (not built).
 > - **§3.7 / §5.3 GitHub App fixture writes.** Not built. Fixtures are written to a **local repo path** only; GitHub App push is deferred.

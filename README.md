@@ -12,15 +12,36 @@ Self-hosted. OpenTelemetry-native. Built for the era where your model keeps chan
 
 ---
 
-## Two tiers of capture (read this first)
+## The problem
 
-Halley is honest about what it captures, because it changes what you get.
+Every team shipping LLM agents hits the same three walls within a month of production:
 
-- **Tier 1: observability, zero Halley code.** Point any OTLP-emitting instrumentation (OpenLLMetry, OpenInference, OTEL GenAI semconv, Vercel AI SDK) at the ingester. You get the full dashboard (runs, spans, timing, token counts, cost) plus automatic invariant inference. Bodies are reconstructed from `gen_ai.*` span events, so they're great for observability and inferring invariants, but they are **not** byte-faithful and cannot drive bit-exact replay on their own.
+- **You can't test cheaply.** Dev and CI traffic hammering live LLM APIs taxes every iteration.
+- **You can't reproduce bugs.** "The agent hallucinated Tuesday." Tuesday is gone, and the model behind it has shifted since.
+- **You can't tell when you got worse.** A one-word prompt tweak or a provider's quiet model upgrade degrades behavior with no stack trace, and teams lose real money before anyone notices.
 
-- **Tier 2: bit-fidelity replay, one-line client wrap.** Add the Halley recorder shim and Halley captures the **full raw request/response JSON**. Now `hash(live request) == recorded match_key` by construction, so `halley ci` replays the exact recorded responses at **$0** and `halley bisect` can binary-search commits deterministically. This is the hero loop in the GIF above.
+Observability tools (Langfuse, Laminar, LangSmith, Phoenix, Helicone) show you the traces. None close the loop from "production run happened" back into "regression test our CI catches next time." **Halley closes that loop.**
 
-Both tiers write the **same** fixture format. Tier 1 gives you observability and invariant inference at zero instrumentation cost; Tier 2 adds the deterministic $0 CI replay. Details: [`docs/fixture-format.md`](docs/fixture-format.md) (capture tiers, D53).
+---
+
+## What's shipped vs planned
+
+Pre-alpha, but the core loop works end to end today.
+
+**Shipped:** OTLP ingest across 5 trace dialects · dashboard (runs, spans, cost) · promote a run into a fixture · structural / schema / metric invariants · `halley ci` deterministic $0 replay · `halley bisect` · GitHub Action · Python record/replay shim.
+
+**Planned, not built:** semantic (LLM-as-judge) invariants (inferred and editable, but the runner is a stub, off by default) · TypeScript recorder shim · GitHub App fixture push (local repo path today) · Kubernetes Helm (Docker Compose today).
+
+---
+
+## Two tiers of capture
+
+What you get depends on how you capture, and Halley is honest about it:
+
+- **Tier 1 (observability, zero Halley code):** point any OTLP instrumentation at the ingester and get the full dashboard plus automatic invariant inference. Bodies are reconstructed from `gen_ai.*` events, so they are **not** byte-faithful and can't drive bit-exact replay.
+- **Tier 2 (bit-fidelity replay, one-line client wrap):** add the recorder shim and Halley captures the full raw request/response JSON, so `halley ci` replays exact responses at **$0** and `halley bisect` is deterministic. This is the loop in the GIF above.
+
+Both write the **same** fixture format. Details: [`docs/fixture-format.md`](docs/fixture-format.md) (D53).
 
 ---
 
@@ -37,6 +58,20 @@ docker compose up
 ```
 
 `docker compose up` brings up the ingester, dashboard, databases, and the code-only worker (promote a run → fixture, edit invariants). The `.env` carries dev-only defaults; copy it once and the stack runs with no further setup. Point any OTLP-instrumented app at the ingester and real traces start flowing.
+
+---
+
+## Documentation
+
+New here? Read [`docs/SCENARIO.md`](docs/SCENARIO.md) first: a concrete real-world story of the loop. Then:
+
+- [`docs/running-the-loop.md`](docs/running-the-loop.md): dashboard + runner + terminal, the full record → promote → CI → bisect loop.
+- [`docs/fixture-format.md`](docs/fixture-format.md): the locked fixture v1 contract and the two capture tiers.
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): system design and data model.
+- [`docs/ROADMAP.md`](docs/ROADMAP.md): what's shipped and what's deferred.
+- Full index: [`docs/`](docs/README.md).
+
+Quickstarts for your stack are below.
 
 ---
 
@@ -58,20 +93,6 @@ Full model, including which worker runs what, host vs. in-network ports, and sta
 [![Fixture Replay ($0)](https://github.com/A-Wattamwar/halley/actions/workflows/halley-ci.yml/badge.svg)](https://github.com/A-Wattamwar/halley/actions/workflows/halley-ci.yml)
 
 Halley ships a GitHub Action ([`.github/workflows/halley-ci.yml`](.github/workflows/halley-ci.yml)) that replays the fixture library in **pure mode ($0, no live calls)** on every pull request, publishes JUnit results as a PR check, and on failure posts a comment with the `halley diff` and `halley bisect` commands to investigate. A second workflow ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) builds and tests the codebase and permanently guards the D22 canonical-hash contract with a Python↔Rust parity check.
-
----
-
-## The problem Halley solves
-
-Every team shipping LLM agents hits the same three walls, usually within a month of going to production.
-
-1. **You cannot test cheaply.** Teams report large fractions of their monthly LLM spend are dev and CI traffic hitting live APIs. Every iteration taxes the bill.
-2. **You cannot reproduce bugs.** A customer says "your agent hallucinated on Tuesday." Tuesday is gone. Even if the run was captured, the model behind it has shifted since.
-3. **You cannot tell when you got worse.** LLMs fail silently. A one-word prompt tweak or a provider's quiet model upgrade degrades behavior in ways no stack trace catches. Teams lose real money before anyone notices.
-
-Existing observability tools (Langfuse, Laminar, LangSmith, Phoenix, Helicone) show the traces. None of them close the loop from "production run happened" back into "regression test our CI will catch next time."
-
-Halley closes that loop.
 
 ---
 
@@ -208,10 +229,7 @@ Detection runs in priority order: halley-raw → OpenLLMetry → OpenInference �
 
 ## What it looks like
 
-**The hero loop in the dashboard.** Promote a run, edit invariants, then run CI and bisect against the real repo, with a runner-status pill and copy-paste terminal commands for every action.
-
-![Fixture edit page header showing the green "Runner: connected" pill next to the fixture title](docs/screenshots/run-ci-connected.png)
-*Runner: connected. A host runner is live, so Run CI and Run bisect execute and stream results in the dashboard.*
+Promote a run, edit invariants, then run CI and bisect against the real repo, with a runner-status pill and copy-paste terminal commands for every action.
 
 ![Run CI result showing 19 of 19 invariants passed for a pure-mode fixture replay](docs/screenshots/run-ci-result.png)
 *A Run CI result: 19/19 invariants passed, $0 pure-mode replay.*
@@ -219,22 +237,7 @@ Detection runs in priority order: halley-raw → OpenLLMetry → OpenInference �
 ![Bisect result naming the offending commit that broke the fixture](docs/screenshots/bisect-result.png)
 *A bisect result: the offending commit, named.*
 
-![Runner not detected: the action shows the exact halley command to copy and run in a terminal](docs/screenshots/runner-not-detected.png)
-*Runner: not detected. The exact `halley` command to copy (D-23). Never a fake spinner.*
-
-**Runs list.** Every agent run in one view with dialect, token counts, cost, and status at a glance.
-
-![Halley runs list: five gpt-4o-mini runs ingested via the otel-genai dialect, each showing spans, token counts, cost, and an ok status](docs/screenshots/runs-list.png)
-
-**Run detail with span inspector.** Click any span bar to open the inspector, showing timing, identity fields (click to copy), model, usage, and the full input/output bodies as pretty-printed JSON.
-
-![Halley run detail page with the span inspector open on a gpt-4o-mini chat span, showing identity, model, usage, and the input/output bodies](docs/screenshots/run-detail-inspector.png)
-
-The graph view (Timeline | Graph tab) shows the same spans as a dagre-laid-out ReactFlow graph, with parent→child edges and the same operation-color palette.
-
-**API keys.** Create, rotate, and revoke project-scoped ingest keys. Keys are prefixed `hlly_`, stored only as SHA-256 hashes, and shown in full exactly once at creation.
-
-![Halley API keys settings page showing the create-key form, an empty key list, and the ingester usage example](docs/screenshots/api-keys.png)
+More screenshots (runs list, span inspector, runner states, API keys) are in [`docs/screenshots/`](docs/screenshots/).
 
 ---
 
@@ -262,18 +265,6 @@ Single-node HTTP ingest load test (Phase 2, Week 4).
 docker compose up -d && make ready
 make load-test
 ```
-
----
-
-## Documentation
-
-Browse everything from the [`docs/`](docs/README.md) index. Highlights:
-
-- [`docs/SCENARIO.md`](docs/SCENARIO.md): a concrete real-world story of what Halley does and why it matters. Read this first.
-- [`docs/running-the-loop.md`](docs/running-the-loop.md): the dashboard + runner + terminal model for record → promote → CI → bisect.
-- [`docs/fixture-format.md`](docs/fixture-format.md): the locked on-disk fixture v1 contract and the two capture tiers.
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md): system design, data model, component responsibilities.
-- [`docs/ROADMAP.md`](docs/ROADMAP.md): build plan, phase deliverables, and what is deferred.
 
 ---
 
